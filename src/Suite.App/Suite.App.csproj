@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>Suite.App</RootNamespace>
+    <AssemblyName>Suite</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <EnableDefaultApplicationDefinition>true</EnableDefaultApplicationDefinition>
+    <Description>Suite tray host. WinForms NotifyIcon interop (no third-party tray NuGet).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Suite.Contracts\Suite.Contracts.csproj" />
+    <ProjectReference Include="..\Suite.Platform\Suite.Platform.csproj" />
+    <ProjectReference Include="..\Suite.ThemeToggle\Suite.ThemeToggle.csproj" />
+    <ProjectReference Include="..\Suite.NetSpeed\Suite.NetSpeed.csproj" />
+    <ProjectReference Include="..\Suite.Capture\Suite.Capture.csproj" />
+    <ProjectReference Include="..\Suite.Pinboard\Suite.Pinboard.csproj" />
+  </ItemGroup>
+  <Target Name="CopyTaskbarFxNative" AfterTargets="Build">
+    <ItemGroup>
+      <_NativeDll Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Native\bin\x64\$(Configuration)\TaskbarFx.Native.dll" />
+      <_NativeDll Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Native\bin\$(Platform)\$(Configuration)\TaskbarFx.Native.dll" />
+      <_NativePdb Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Native\bin\x64\$(Configuration)\TaskbarFx.Native.pdb" />
+      <_NativePdb Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Native\bin\$(Platform)\$(Configuration)\TaskbarFx.Native.pdb" />
+      <_TapDll Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Tap\bin\x64\$(Configuration)\TaskbarFx.Tap.dll" />
+      <_TapDll Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Tap\bin\$(Platform)\$(Configuration)\TaskbarFx.Tap.dll" />
+      <_TapPdb Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Tap\bin\x64\$(Configuration)\TaskbarFx.Tap.pdb" />
+      <_TapPdb Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Tap\bin\$(Platform)\$(Configuration)\TaskbarFx.Tap.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_NativeDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+    <Copy SourceFiles="@(_NativePdb)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+    <Copy SourceFiles="@(_TapDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+    <Copy SourceFiles="@(_TapPdb)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+  </Target>
+</Project>

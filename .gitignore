@@ -1,0 +1,94 @@
+# Build
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa]pppackages/
+[Bb]uild/
+*.dll
+*.exe
+*.pdb
+*.cache
+*.log
+
+# C++/WinRT generated projections (TaskbarFx.Tap)
+**/Generated Files/
+
+# Visual Studio / MSBuild
+.vs/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+*.rsuser
+*.userprefs
+*.DotSettings.user
+*.VC.db
+*.VC.opendb
+*.aps
+
+# Test
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+coverage*.xml
+*.coverage
+*.coveragexml
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Publish / installer leftovers (P0 has none; keep ignored)
+publish/
+*.msi
+*.msix
+*.appx
+*.appxbundle
+
+# Certificates and signing material — never commit
+*.pfx
+*.p12
+*.snk
+*.cer
+*.crt
+*.der
+*.pem
+*.key
+*.pvk
+*.spc
+*.p7b
+*.p7c
+*.codesign
+*.Authenticode
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+*~
+*.swp
+*.bak
+
+# User secrets / local env
+secrets.json
+**/secrets.json
+appsettings.*.local.json
+.env
+.env.*
+!.env.example
+
+
+# JetBrains Rider
+.idea/
+*.sln.iml

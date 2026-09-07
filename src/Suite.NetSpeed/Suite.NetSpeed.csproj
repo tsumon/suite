@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Suite.NetSpeed</RootNamespace>
+    <AssemblyName>Suite.NetSpeed</AssemblyName>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Description>IP Helper GetIfTable2/GetIfEntry2 sampling and rate calculation. No UI.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Suite.Contracts\Suite.Contracts.csproj" />
+    <ProjectReference Include="..\Suite.Platform\Suite.Platform.csproj" />
+  </ItemGroup>
+</Project>

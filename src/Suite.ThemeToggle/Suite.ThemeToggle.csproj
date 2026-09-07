@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Suite.ThemeToggle</RootNamespace>
+    <AssemblyName>Suite.ThemeToggle</AssemblyName>
+    <Description>Read-flip-write AppsUseLightTheme + SystemUsesLightTheme, then ImmersiveColorSet broadcast.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Suite.Contracts\Suite.Contracts.csproj" />
+    <ProjectReference Include="..\Suite.Platform\Suite.Platform.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,32 @@
+<Window x:Class="Suite.App.HistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="截图历史"
+        Width="420" Height="480"
+        WindowStartupLocation="CenterScreen"
+        FontFamily="Segoe UI, Microsoft YaHei UI, sans-serif"
+        FontSize="13">
+  <DockPanel Margin="12">
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+      <Button Content="清空" Width="72" Margin="0,0,8,0" Click="OnClear"/>
+      <Button Content="关闭" Width="72" IsCancel="True" Click="OnClose"/>
+    </StackPanel>
+    <TextBlock DockPanel.Dock="Top" x:Name="PathHint" FontSize="12" Foreground="#666666" TextWrapping="Wrap" Margin="0,0,0,8"/>
+    <TextBlock DockPanel.Dock="Top" x:Name="EmptyText" Text="还没有截图记录。" Margin="0,24,0,0" HorizontalAlignment="Center" Visibility="Collapsed"/>
+    <ListBox x:Name="List" BorderThickness="0" MouseDoubleClick="OnDoubleClick" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+      <ListBox.ItemTemplate>
+        <DataTemplate>
+          <DockPanel Margin="0,4">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+              <Button Content="复制" Width="48" Margin="4,0" Tag="{Binding Path}" Click="OnCopy"/>
+              <Button Content="钉上" Width="48" Margin="4,0" Tag="{Binding Path}" Click="OnPin"/>
+              <Button Content="删除" Width="48" Margin="4,0" Tag="{Binding Path}" Click="OnDelete"/>
+            </StackPanel>
+            <Image Source="{Binding Thumb}" Width="64" Height="48" Stretch="Uniform" Margin="0,0,8,0"/>
+            <TextBlock Text="{Binding TimeLabel}" VerticalAlignment="Center"/>
+          </DockPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </DockPanel>
+</Window>

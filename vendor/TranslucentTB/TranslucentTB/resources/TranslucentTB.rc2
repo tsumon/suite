@@ -1,0 +1,28 @@
+#pragma code_page(65001)
+
+#ifdef APSTUDIO_INVOKED
+#error Please edit this file manually.
+#endif
+
+#include <ddeml.h>
+#include <winres.h>
+#include "ids.h"
+
+LANGUAGE LANG_INVARIANT, SUBLANG_NEUTRAL
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icons
+//
+
+#if defined(BUILD_TYPE) && BUILD_TYPE == 0
+IDI_MAINICON            ICON                    "TranslucentTB.release.ico"
+#elif defined(BUILD_TYPE) && BUILD_TYPE == 1
+IDI_MAINICON            ICON                    "TranslucentTB.canary.ico"
+#else
+IDI_MAINICON            ICON                    "TranslucentTB.dev.ico"
+#endif
+
+IDI_TRAYWHITEICON       ICON                    "TranslucentTB.white.ico"
+IDI_TRAYBLACKICON       ICON                    "TranslucentTB.black.ico"

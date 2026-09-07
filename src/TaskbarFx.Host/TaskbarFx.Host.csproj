@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>TaskbarFx.Host</RootNamespace>
+    <AssemblyName>TaskbarFx</AssemblyName>
+    <StartupObject>TaskbarFx.Host.Program</StartupObject>
+    <UseWPF>false</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Description>OPTIONAL/DEPRECATED helper process. Main path is Suite in-process Native DLL. Named-pipe server kept for --reset.</Description>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Suite.Contracts\Suite.Contracts.csproj" />
+    <ProjectReference Include="..\Suite.Platform\Suite.Platform.csproj" />
+  </ItemGroup>
+  <Target Name="CopyNativeDll" AfterTargets="Build">
+    <ItemGroup>
+      <_NativeDll Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Native\bin\$(Platform)\$(Configuration)\TaskbarFx.Native.dll" />
+      <_NativeDll Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Native\bin\x64\$(Configuration)\TaskbarFx.Native.dll" />
+      <_NativePdb Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Native\bin\$(Platform)\$(Configuration)\TaskbarFx.Native.pdb" />
+      <_NativePdb Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Native\bin\x64\$(Configuration)\TaskbarFx.Native.pdb" />
+      <_TapDll Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Tap\bin\$(Platform)\$(Configuration)\TaskbarFx.Tap.dll" />
+      <_TapDll Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Tap\bin\x64\$(Configuration)\TaskbarFx.Tap.dll" />
+      <_TapPdb Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Tap\bin\$(Platform)\$(Configuration)\TaskbarFx.Tap.pdb" />
+      <_TapPdb Include="$(MSBuildThisFileDirectory)..\TaskbarFx.Tap\bin\x64\$(Configuration)\TaskbarFx.Tap.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_NativeDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+    <Copy SourceFiles="@(_NativePdb)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+    <Copy SourceFiles="@(_TapDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+    <Copy SourceFiles="@(_TapPdb)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+  </Target>
+</Project>

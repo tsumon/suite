@@ -1,0 +1,11 @@
+Matched-background product scene for Suite README hero subject.
+
+Subject: Windows 11 desktop product mock — charcoal technical aesthetic.
+- Blurred mountain wallpaper (grayscale / charcoal tones matching #1A1A1A–#2B2B2B)
+- Centered blue selection rectangle (#2080F0) with four solid corner anchor squares (snip selection frame motif)
+- Bottom Win11 taskbar with embedded net-speed chip (TrafficMonitor-style): dark rounded pill, ↓ download rate + ↑ upload rate, accent blue on download mark
+- Taskbar icons and tray present; no Suite logo, no watermarks, no marketing body copy on the scene
+- Accent #2080F0; foreground light text only on chip; snip red unused in this frame
+- 16:9-ish product crop intended for right half of 1200×420 hybrid board; left side of final board is dark typography panel (not chroma-keyed)
+
+Audience cue: Windows power users — capture + netspeed + transparency in one tray app.

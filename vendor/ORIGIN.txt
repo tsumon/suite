@@ -1,0 +1,12 @@
+TranslucentTB (GPL-3.0)
+https://github.com/TranslucentTB/TranslucentTB
+branch: release
+commit: d4636e439865df0a1a1419db408e055740ce5c74
+cloned: 2026-09-05 (depth 1)
+
+Suite does not compile this tree as-is.
+Win11 TAP in src/TaskbarFx.Tap/ is adapted from ExplorerTAP / VisualTreeWatcher /
+TaskbarAppearanceService. XAML settings UI, ExplorerHooks, and AppPackage are
+vendored for provenance and corresponding-source only — do not ship them.
+
+Do not add TrafficMonitor (Anti-996) source to this tree.

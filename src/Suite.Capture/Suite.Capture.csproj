@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Suite.Capture</RootNamespace>
+    <AssemblyName>Suite.Capture</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>Region capture: Graphics Capture, DXGI duplication, GDI BitBlt fallback, overlay, annotations. No injection.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Suite.Capture.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Suite.Contracts\Suite.Contracts.csproj" />
+    <ProjectReference Include="..\Suite.Platform\Suite.Platform.csproj" />
+  </ItemGroup>
+</Project>

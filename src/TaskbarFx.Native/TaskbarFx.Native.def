@@ -1,0 +1,6 @@
+LIBRARY TaskbarFx.Native
+EXPORTS
+    TaskbarFxApply
+    TaskbarFxReset
+    TaskbarFxProbeKind
+    TaskbarFxLastMessage

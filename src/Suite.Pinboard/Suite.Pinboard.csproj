@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Suite.Pinboard</RootNamespace>
+    <AssemblyName>Suite.Pinboard</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <Description>Topmost pin windows: drag, wheel zoom, opacity, close, click-through. No grouping/GIF/backup.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Suite.Contracts\Suite.Contracts.csproj" />
+    <ProjectReference Include="..\Suite.Platform\Suite.Platform.csproj" />
+  </ItemGroup>
+</Project>

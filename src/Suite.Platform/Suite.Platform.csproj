@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Suite.Platform</RootNamespace>
+    <AssemblyName>Suite.Platform</AssemblyName>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Description>OS helpers: mutex, HKCU Run, Personalize registry, RegisterHotKey, SendMessageTimeoutW, taskbar probe, named-pipe ACL. No SWCA/TAP.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Suite.Contracts\Suite.Contracts.csproj" />
+  </ItemGroup>
+</Project>

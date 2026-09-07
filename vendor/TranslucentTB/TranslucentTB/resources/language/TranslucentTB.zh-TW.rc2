@@ -1,0 +1,67 @@
+#pragma code_page(65001)
+
+#ifdef APSTUDIO_INVOKED
+#error Please edit this file manually.
+#endif
+
+#include <ddeml.h>
+#include <winres.h>
+#include "../../../Common/appinfo.hpp"
+#include "../ids.h"
+
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+	FILEVERSION APP_VERSION_FIXED
+	PRODUCTVERSION APP_VERSION_FIXED
+	FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+	FILEFLAGS VS_FF_DEBUG
+#endif
+	FILEOS VOS_NT_WINDOWS32
+	FILETYPE VFT_APP
+{
+	BLOCK L"StringFileInfo"
+	{
+		BLOCK L"040404b0"
+		{
+			VALUE L"FileDescription", APP_NAME
+			VALUE L"FileVersion", APP_VERSION
+			VALUE L"InternalName", APP_NAME L".exe"
+			VALUE L"OriginalFilename", APP_NAME L".exe"
+			VALUE L"ProductName", APP_NAME
+			VALUE L"ProductVersion", APP_VERSION
+			VALUE L"Comments", L"一個能夠使 Windows 工作列變半透明/透明的輕量化小工具。"
+			VALUE L"CompanyName", APP_NAME L" 開源開發者"
+			VALUE L"LegalCopyright", L"版權所有 © " APP_COPYRIGHT_YEAR L" " APP_NAME L" 開源開發者"
+		}
+	}
+	BLOCK L"VarFileInfo"
+	{
+		VALUE L"Translation", 0x0404, CP_WINUNICODE
+	}
+}
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Strings
+//
+
+STRINGTABLE
+{
+	IDS_WELCOME_NOTIFICATION APP_NAME L" 將隱藏在工具列中。\n\n對工具列圖示點擊右鍵以變更設定、設為開機時啟動、檢視關於資訊、關閉應用程式...等。"
+	IDS_ALREADY_RUNNING APP_NAME L" 已經在執行了！在工具欄圖示點擊右鍵以存取。"
+	IDS_LANGUAGE_CHANGED L"設定檔中的語言覆蓋設定已變更。請重新啟動 " APP_NAME L" 以使變更套用。"
+	IDS_RESTART_REQUIRED APP_NAME L"最近已更新。請重新啟動 Windows 以開始使用最新版本。"
+	IDS_PORTABLE_UNSUPPORTED L"便攜式模式僅適用於 Windows 11。"
+	IDS_MISSING_DEPENDENCIES APP_NAME L" 無法以便攜模式啟動，因為系統上未安裝 {0} (版本 {1}) 。"
+	IDS_EXPLORER_RESTARTED_TOO_MUCH L"Windows 檔案總管在過去 30 秒內重新啟動了兩次！這可能是 " APP_NAME " 與其他 shell 個人化軟體或其 Windows 更新造成的衝突。為了避免進一步的問題，" APP_NAME " 現在將結束。"
+	IDS_STARTUPTASK_BROKEN APP_NAME L"要求 Windows 執行啟動工作，但 Windows 並未執行。這通常可能是在電腦上執行 debloating 或隱私腳本造成登錄檔損壞的原因。"
+}

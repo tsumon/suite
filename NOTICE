@@ -1,0 +1,21 @@
+Suite (Windows utility collection)
+Copyright (C) 2026 Joe / contributors
+
+This program is free software under the GNU General Public License v3.0.
+See LICENSE.
+
+Portions of the Win11 taskbar appearance path are derived from TranslucentTB
+(ExplorerTAP / VisualTreeWatcher / TaskbarAppearanceService):
+
+  TranslucentTB — https://github.com/TranslucentTB/TranslucentTB
+  License: GPL-3.0
+  Copyright (C) TranslucentTB contributors
+  Snapshot: vendor/TranslucentTB (release branch, commit
+  d4636e439865df0a1a1419db408e055740ce5c74)
+  Adapted sources: src/TaskbarFx.Tap/
+
+Suite does not ship TranslucentTB's XAML settings UI, ExplorerHooks, or
+AppPackage. Corresponding source for the adapted TAP is in this tree.
+
+Do not combine Anti-996 licensed TrafficMonitor source into this tree without
+a separate legal review.

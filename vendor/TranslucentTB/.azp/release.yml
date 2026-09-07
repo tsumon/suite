@@ -1,0 +1,53 @@
+pool:
+  vmImage: 'windows-2025'
+
+trigger:
+  tags:
+    include:
+    - '*'
+
+steps:
+- template: templates/build.yml
+  parameters:
+    platform: x64
+    configuration: Release
+    buildType: Release
+- powershell: $(Build.SourcesDirectory)/.azp/scripts/create-portable.ps1 -Platform x64 -Configuration Release -WorkDir "$(Pipeline.Workspace)" -OutputDir "$(Build.ArtifactStagingDirectory)\github" -NoConfig -Compress
+  displayName: Create x64 portable build
+- powershell: $(Build.SourcesDirectory)/.azp/scripts/create-portable.ps1 -Platform ARM64 -Configuration Release -WorkDir "$(Pipeline.Workspace)" -OutputDir "$(Build.ArtifactStagingDirectory)\github" -NoConfig -Compress
+  displayName: Create ARM portable build
+- powershell: $(Build.SourcesDirectory)/.azp/scripts/copy-msix.ps1 -OutputDir "$(Build.ArtifactStagingDirectory)\upload"
+  displayName: Copy MSIX
+- publish: $(Build.ArtifactStagingDirectory)\upload
+  artifact: 'Store MSIX'
+  displayName: Upload MSIX
+- task: PublishSymbols@2
+  displayName: Publish x64 PDB symbols
+  inputs:
+    SymbolsFolder: $(Build.SourcesDirectory)/AppPackage/bin/x64/Release
+    SearchPattern: '*.pdb'
+    IndexSources: false
+    SymbolServerType: TeamServices
+- task: PublishSymbols@2
+  displayName: Publish ARM64 PDB symbols
+  inputs:
+    SymbolsFolder: $(Build.SourcesDirectory)/AppPackage/bin/ARM64/Release
+    SearchPattern: '*.pdb'
+    IndexSources: false
+    SymbolServerType: TeamServices
+- task: GitHubRelease@1
+  displayName: Create draft GitHub release
+  inputs:
+    gitHubConnection: TranslucentTB Release
+    assets: $(Build.ArtifactStagingDirectory)\github\*
+    isDraft: true
+- task: PowerShell@2
+  displayName: Retain build
+  inputs:
+    failOnStderr: true
+    targetType: 'inline'
+    script: |
+      $headers = @{ Authorization = 'Bearer $(System.AccessToken)' };
+      $rawRequest = @{ daysValid = 365 * 100; definitionId = $(System.DefinitionId); ownerId = 'User:$(Build.RequestedForId)'; protectPipeline = $false; runId = $(Build.BuildId) };
+      $uri = "$(System.CollectionUri)$(System.TeamProject)/_apis/build/retention/leases?api-version=7.0";
+      Invoke-RestMethod -Uri $uri -method Post -Headers $headers -ContentType "application/json" -Body (ConvertTo-Json @($rawRequest));

@@ -1,0 +1,23 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = tab
+tab_width = 4
+
+[*.{appxmanifest,config,filters,props,vcxitems,vcxproj,wapproj}]
+insert_final_newline = false
+
+[*.{appxmanifest,config,filters,json,manifest,md,natvis,props,slnx,vcxitems,vcxproj,wapproj,yml}]
+indent_style = spaces
+indent_size = 2
+
+[*.xaml]
+indent_style = spaces
+indent_size = 4
+
+[*.csv]
+charset = utf-8-bom

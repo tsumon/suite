@@ -1,0 +1,160 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Resources">
+      <UniqueIdentifier>accd3aa8-1ba0-4223-9bbe-0c431709210b</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tga;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Generated Files">
+      <UniqueIdentifier>{926ab91d-31b4-48c3-b9a4-e681349f27f0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings">
+      <UniqueIdentifier>{363aa34d-93bf-4701-8510-bb45cb3cfd1e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\en-US">
+      <UniqueIdentifier>{7b45cdc2-9ecd-4045-84b1-9ffd61a63be8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\ja-JP">
+      <UniqueIdentifier>{aa4e1600-db10-4d3f-9199-e663c3ed832d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\zh-TW">
+      <UniqueIdentifier>{d5edc189-37f7-456e-a1a2-277be644f570}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\zh-CN">
+      <UniqueIdentifier>{c759777b-77fe-4280-8e86-b5aeddb0301b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\es-US">
+      <UniqueIdentifier>{4369de61-d9fa-41ae-9d0e-06959442e222}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\de-DE">
+      <UniqueIdentifier>{c69368bf-a517-45c5-a527-5bde79049f4c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\tr-TR">
+      <UniqueIdentifier>{892f1e8f-f237-41e7-9f55-86bda17245fb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\id-ID">
+      <UniqueIdentifier>{28e9c66e-8ff1-4c04-ba70-3faf47ed9668}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\ru-RU">
+      <UniqueIdentifier>{dc632056-91f7-43ac-a253-f3c1bcd8c0f5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\uk-UA">
+      <UniqueIdentifier>{09b0c717-6adc-41d5-85cd-c605b913d60b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\ko-KR">
+      <UniqueIdentifier>{ff016652-900e-4531-b2f5-8160f949e192}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Strings\he-IL">
+      <UniqueIdentifier>{20c40651-21b2-45b6-9707-197a848bd1b3}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="pch.cpp" />
+    <ClCompile Include="$(GeneratedFilesDir)module.g.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Controls\colorpickerrendering.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Xaml.def">
+      <Filter>Generated Files</Filter>
+    </None>
+    <None Include="packages.config" />
+    <None Include="vcpkg.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="App.base.hpp" />
+    <ClInclude Include="PropertyChangedBase.hpp" />
+    <ClInclude Include="dependencyproperty.h" />
+    <ClInclude Include="factory.h" />
+    <ClInclude Include="event.h" />
+    <ClInclude Include="property.h" />
+    <ClInclude Include="Controls\colorpickerrendering.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Include="Pages\WelcomePage.xaml" />
+    <Page Include="Pages\FramelessPage.xaml" />
+    <Page Include="Controls\ChromeButton.xaml" />
+    <Page Include="Controls\ActionList.xaml" />
+    <Page Include="Pages\ColorPickerPage.xaml" />
+    <Page Include="Pages\TrayFlyoutPage.xaml" />
+    <Page Include="Themes\Generic.xaml" />
+    <Page Include="Controls\ColorPickerSlider.xaml" />
+    <Page Include="Controls\ColorPicker.xaml" />
+    <Page Include="Controls\FocusBorderColorSpectrum.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="Models\Action.idl" />
+    <Midl Include="FunctionalConverters.idl" />
+    <Midl Include="StyleResources.idl" />
+    <Midl Include="Models\Primitives\AccentState.idl" />
+    <Midl Include="Models\Primitives\TaskbarAppearance.idl" />
+    <Midl Include="Models\Primitives\OptionalTaskbarAppearance.idl" />
+    <Midl Include="Models\Primitives\TaskbarState.idl" />
+    <Midl Include="Models\Primitives\LogLevel.idl" />
+    <Midl Include="Models\Primitives\LogSinkState.idl" />
+    <Midl Include="Controls\ColorPicker.idl" />
+    <Midl Include="Controls\ColorPickerSlider.idl" />
+    <Midl Include="Models\Primitives\ColorChannel.idl" />
+    <Midl Include="Models\Primitives\HsvColor.idl" />
+    <Midl Include="Models\Primitives\ColorRepresentation.idl" />
+    <Midl Include="Converters\ContrastBrushConverter.idl" />
+    <Midl Include="Controls\ChromeButton.idl" />
+    <Midl Include="Models\Primitives\IColorPalette.idl" />
+    <Midl Include="Controls\UniformGrid.idl" />
+    <Midl Include="Converters\ColorToColorShadeConverter.idl" />
+    <Midl Include="Converters\ColorToDisplayNameConverter.idl" />
+    <Midl Include="RelativeAncestor.idl" />
+    <Midl Include="Controls\SwitchPresenter.idl" />
+    <Midl Include="Controls\Case.idl" />
+    <Midl Include="Models\FluentColorPalette.idl" />
+    <Midl Include="Converters\ThicknessFilterConverter.idl" />
+    <Midl Include="Models\Primitives\ThicknessFilterKind.idl" />
+    <Midl Include="Controls\ConstrainedBox.idl" />
+    <Midl Include="Controls\FocusBorderColorSpectrum.idl" />
+    <Midl Include="BindableObjectReference.idl" />
+    <Midl Include="Models\Primitives\TaskbarType.idl" />
+  </ItemGroup>
+  <ItemGroup>
+    <PRIResource Include="Strings\en-US\Resources.resw">
+      <Filter>Resources\Strings\en-US</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\ja-JP\Resources.resw">
+      <Filter>Resources\Strings\ja-JP</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\zh-TW\Resources.resw">
+      <Filter>Resources\Strings\zh-TW</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\zh-CN\Resources.resw">
+      <Filter>Resources\Strings\zh-CN</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\es-US\Resources.resw">
+      <Filter>Resources\Strings\es-US</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\de-DE\Resources.resw">
+      <Filter>Resources\Strings\de-DE</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\tr-TR\Resources.resw">
+      <Filter>Resources\Strings\tr-TR</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\id-ID\Resources.resw">
+      <Filter>Resources\Strings\id-ID</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\ru-RU\Resources.resw">
+      <Filter>Resources\Strings\ru-RU</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\uk-UA\Resources.resw">
+      <Filter>Resources\Strings\uk-UA</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\ko-KR\Resources.resw">
+      <Filter>Resources\Strings\ko-KR</Filter>
+    </PRIResource>
+    <PRIResource Include="Strings\he-IL\Resources.resw">
+      <Filter>Resources\Strings\he-IL</Filter>
+    </PRIResource>
+  </ItemGroup>
+</Project>

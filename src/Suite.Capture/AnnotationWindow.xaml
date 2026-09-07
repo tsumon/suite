@@ -1,0 +1,16 @@
+<Window x:Class="Suite.Capture.AnnotationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Suite 标注"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        SnapsToDevicePixels="True"
+        PreviewKeyDown="OnPreviewKeyDown"
+        PreviewMouseRightButtonUp="OnRightUp"
+        PreviewMouseDown="OnPreviewMouseDown">
+  <Canvas x:Name="Root"/>
+</Window>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1200" height="420" viewBox="0 0 1200 420" role="img"
+     aria-label="Suite — Windows tray utility hero">
+  <!-- Editable layout source for assets/readme/hero.png (compose with PIL; rsvg optional).
+       Split: left typography panel, right subject slot (hero-subject.png). -->
+  <defs>
+    <linearGradient id="leftFade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1A1A1A" stop-opacity="1"/>
+      <stop offset="78%" stop-color="#1A1A1A" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#1A1A1A" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="board">
+      <rect x="0" y="0" width="1200" height="420" rx="10" ry="10"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#board)">
+    <!-- Right subject region (composer pastes hero-subject.png cover-cropped here) -->
+    <rect id="subject-slot" x="400" y="0" width="800" height="420" fill="#2B2B2B"/>
+    <!-- Left typography panel with soft fade into subject -->
+    <rect x="0" y="0" width="580" height="420" fill="url(#leftFade)"/>
+
+    <!-- Category -->
+    <text x="48" y="88"
+          font-family="Segoe UI, Lato, system-ui, sans-serif"
+          font-size="13" font-weight="600" letter-spacing="2.6"
+          fill="#888888">WINDOWS TRAY UTILITY</text>
+
+    <!-- Product name -->
+    <text x="48" y="176"
+          font-family="Segoe UI, Lato, system-ui, sans-serif"
+          font-size="76" font-weight="700"
+          fill="#F0F0F0">Suite</text>
+
+    <!-- Accent underline -->
+    <rect x="48" y="198" width="52" height="3" rx="1.5" fill="#2080F0"/>
+
+    <!-- One-line value -->
+    <text x="48" y="242"
+          font-family="Segoe UI, Noto Sans CJK SC, system-ui, sans-serif"
+          font-size="19" font-weight="500"
+          fill="#F0F0F0">F1 截图 · 任务栏网速 · 透明 · 深浅色</text>
+
+    <!-- Metadata -->
+    <text x="48" y="292"
+          font-family="Consolas, Cascadia Mono, DejaVu Sans Mono, monospace"
+          font-size="14"
+          fill="#888888">GPL-3.0 · .NET · Win10/11 x64</text>
+
+    <!-- Motif: tiny netspeed marks (selection frame lives on subject raster) -->
+    <g id="netspeed-motif" font-family="Segoe UI, system-ui, sans-serif" font-size="12" font-weight="700">
+      <text x="48" y="372" fill="#2080F0">↑</text>
+      <text x="66" y="372" fill="#6AC86A">↓</text>
+    </g>
+  </g>
+</svg>

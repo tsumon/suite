@@ -1,0 +1,67 @@
+#pragma code_page(65001)
+
+#ifdef APSTUDIO_INVOKED
+#error Please edit this file manually.
+#endif
+
+#include <ddeml.h>
+#include <winres.h>
+#include "../../../Common/appinfo.hpp"
+#include "../ids.h"
+
+LANGUAGE LANG_KOREAN, SUBLANG_KOREAN
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+	FILEVERSION APP_VERSION_FIXED
+	PRODUCTVERSION APP_VERSION_FIXED
+	FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+	FILEFLAGS VS_FF_DEBUG
+#endif
+	FILEOS VOS_NT_WINDOWS32
+	FILETYPE VFT_APP
+{
+	BLOCK L"StringFileInfo"
+	{
+		BLOCK L"041204b0"
+		{
+			VALUE L"FileDescription", APP_NAME
+			VALUE L"FileVersion", APP_VERSION
+			VALUE L"InternalName", APP_NAME L".exe"
+			VALUE L"OriginalFilename", APP_NAME L".exe"
+			VALUE L"ProductName", APP_NAME
+			VALUE L"ProductVersion", APP_VERSION
+			VALUE L"Comments", L"Windows 작업 표시줄을 반투명/투명하게 만드는 경량 유틸리티입니다"
+			VALUE L"CompanyName", APP_NAME L"오픈 소스 개발자"
+			VALUE L"LegalCopyright", L"Copyright © " APP_COPYRIGHT_YEAR L" " APP_NAME L" 오픈 소스 개발자"
+		}
+	}
+	BLOCK L"VarFileInfo"
+	{
+		VALUE L"Translation", 0x0412, CP_WINUNICODE
+	}
+}
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Strings
+//
+
+STRINGTABLE
+{
+	IDS_WELCOME_NOTIFICATION APP_NAME L" 시스템 트레이에 살고 있습니다.\n\n트레이 아이콘을 마우스 오른쪽 버튼으로 클릭하여 설정을 변경하고, 부팅 시 앱이 열리도록 설정하고, 정보를 보고, 앱을 종료하는 등의 작업을 수행합니다."
+	IDS_ALREADY_RUNNING APP_NAME L" 가 이미 실행 중입니다! 트레이 아이콘을 마우스 오른쪽 버튼으로 클릭하여 액세스합니다."
+	IDS_LANGUAGE_CHANGED L"구성 파일의 언어 재정의 설정이 변경되었습니다. 변경 사항을 적용하려면 " APP_NAME L"를 다시 시작하십시오."
+	IDS_RESTART_REQUIRED APP_NAME L" 최근에 업데이트되었습니다. 최신 버전을 사용하려면 Windows를 다시 시작하십시오."
+	IDS_PORTABLE_UNSUPPORTED L"포터블 모드는 Windows 11에서만 작동합니다."
+	IDS_MISSING_DEPENDENCIES APP_NAME L" {0} (버전 {1})이(가) 시스템에 설치되어 있지 않으므로 포터블 모드로 시작할 수 없습니다."
+	IDS_EXPLORER_RESTARTED_TOO_MUCH L"Windows 탐색기가 지난 30초 동안 두 번 다시 시작되었습니다! 이것은 " APP_NAME "과 다른 셸 사용자 지정 소프트웨어 또는 Windows 업데이트 간의 충돌일 수 있습니다. 더 이상의 문제를 방지하기 위해 " APP_NAME "가 종료됩니다."
+	IDS_STARTUPTASK_BROKEN APP_NAME L" Windows에서 시작 작업을 활성화하도록 요청했지만 Windows에서 이 작업을 활성화하지 않았습니다. 이는 일반적으로 컴퓨터에서 디플로팅 또는 개인 정보 보호 스크립트가 실행되어 발생할 수 있는 손상된 레지스트리의 결과입니다."
+}

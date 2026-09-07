@@ -1,0 +1,25 @@
+import "Models/Primitives/AccentState.idl";
+
+namespace TranslucentTB.Xaml.Models.Primitives
+{
+	unsealed runtimeclass TaskbarAppearance
+	{
+		TaskbarAppearance();
+		TaskbarAppearance(AccentState accent, Windows.UI.Color color, Boolean showPeek, Boolean showLine, Single blurRadius);
+
+		[noexcept]
+		AccentState Accent;
+
+		[noexcept]
+		Windows.UI.Color Color;
+
+		[noexcept]
+		Boolean ShowPeek;
+
+		[noexcept]
+		Boolean ShowLine;
+
+		[noexcept]
+		Single BlurRadius;
+	}
+}

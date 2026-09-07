@@ -1,0 +1,415 @@
+<Window x:Class="Suite.App.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Suite 设置"
+        Width="720" Height="520"
+        MinWidth="640" MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize"
+        FontFamily="Segoe UI, Microsoft YaHei UI, sans-serif"
+        FontSize="13"
+        Background="{DynamicResource SetBgBrush}"
+        Foreground="{DynamicResource InkBrush}">
+  <Window.Resources>
+    <!-- Light defaults; ApplyChrome swaps for dark tokens (SETTINGS-PAGE-POLISH v2.1). -->
+    <SolidColorBrush x:Key="SetBgBrush" Color="#F3F3F3"/>
+    <SolidColorBrush x:Key="SetNavBgBrush" Color="#E4E4E4"/>
+    <SolidColorBrush x:Key="SetNavHoverBrush" Color="#E0E0E0"/>
+    <SolidColorBrush x:Key="SetNavActiveBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="SetNavActiveBorderBrush" Color="#E0E0E0"/>
+    <SolidColorBrush x:Key="SetNavAccentBrush" Color="#171717"/>
+    <SolidColorBrush x:Key="SetSurfaceBrush" Color="#FAFAFA"/>
+    <SolidColorBrush x:Key="SetFooterBgBrush" Color="#F3F3F3"/>
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FAFAFA"/>
+    <SolidColorBrush x:Key="InkBrush" Color="#171717"/>
+    <SolidColorBrush x:Key="InkSecondaryBrush" Color="#5C5C5C"/>
+    <SolidColorBrush x:Key="MutedBrush" Color="#5A5A5A"/>
+    <SolidColorBrush x:Key="DisabledBrush" Color="#9A9A9A"/>
+    <SolidColorBrush x:Key="LineBrush" Color="#C8C8C8"/>
+    <SolidColorBrush x:Key="StatusBrush" Color="#5A5A5A"/>
+    <SolidColorBrush x:Key="StatusErrBrush" Color="#B42318"/>
+
+    <Style x:Key="PageTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="16"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+      <Setter Property="Margin" Value="0,0,0,4"/>
+    </Style>
+
+    <Style x:Key="PageTitleHairline" TargetType="Border">
+      <Setter Property="Height" Value="1"/>
+      <Setter Property="Background" Value="{DynamicResource LineBrush}"/>
+      <Setter Property="Margin" Value="0,0,0,12"/>
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <Style x:Key="BlockHairline" TargetType="Border">
+      <Setter Property="Height" Value="1"/>
+      <Setter Property="Background" Value="{DynamicResource LineBrush}"/>
+      <Setter Property="Margin" Value="0,16,0,16"/>
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <Style x:Key="SectionTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+      <Setter Property="Margin" Value="0"/>
+    </Style>
+
+    <Style x:Key="HelpText" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="Normal"/>
+      <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="Margin" Value="0,6,0,0"/>
+      <Setter Property="LineHeight" Value="16.8"/>
+    </Style>
+
+    <Style x:Key="FieldLabel" TargetType="TextBlock">
+      <Setter Property="Width" Value="108"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+    </Style>
+
+    <Style x:Key="NavHeader" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+      <Setter Property="Margin" Value="12,0,12,8"/>
+    </Style>
+
+    <Style x:Key="PrimaryButton" TargetType="Button">
+      <Setter Property="Padding" Value="12,4"/>
+      <Setter Property="FontSize" Value="13"/>
+    </Style>
+
+    <Style x:Key="ColorSwatch" TargetType="Border">
+      <Setter Property="Width" Value="18"/>
+      <Setter Property="Height" Value="18"/>
+      <Setter Property="CornerRadius" Value="2"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
+      <Setter Property="HorizontalAlignment" Value="Left"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <Style x:Key="NavButton" TargetType="Button">
+      <Setter Property="Height" Value="40"/>
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="Margin" Value="0"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource InkSecondaryBrush}"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="Normal"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <!-- Item 40 tall; pill 32 with 4px vertical pad. Accent 3×20 inset 8 from left. -->
+            <Border Background="Transparent" Padding="0,4">
+              <Border x:Name="Bd"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{DynamicResource SetNavActiveBorderBrush}"
+                      BorderThickness="0"
+                      CornerRadius="6"
+                      SnapsToDevicePixels="True">
+                <Grid MinHeight="32">
+                  <Border x:Name="Accent"
+                          Width="3" Height="20"
+                          HorizontalAlignment="Left" VerticalAlignment="Center"
+                          Margin="8,0,0,0"
+                          CornerRadius="1.5"
+                          Background="{TemplateBinding BorderBrush}"
+                          SnapsToDevicePixels="True"/>
+                  <ContentPresenter Margin="24,0,12,0" VerticalAlignment="Center"
+                                    HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                </Grid>
+              </Border>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SetNavHoverBrush}"/>
+              </Trigger>
+              <!-- Selected (SemiBold from StyleNav) wins over hover; Tag stays page id. -->
+              <Trigger Property="FontWeight" Value="SemiBold">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SetNavActiveBrush}"/>
+                <Setter TargetName="Bd" Property="BorderThickness" Value="1"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="48"/>
+    </Grid.RowDefinitions>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="208"/>
+      <ColumnDefinition Width="1"/>
+      <ColumnDefinition Width="*"/>
+    </Grid.ColumnDefinitions>
+
+    <!-- Left nav rail (POLISH: deeper than content, pill + accent) -->
+    <Border Grid.Row="0" Grid.Column="0" Background="{DynamicResource SetNavBgBrush}" Padding="8,12,8,12">
+      <StackPanel>
+        <TextBlock Style="{StaticResource NavHeader}" Text="设置"/>
+        <Button x:Name="NavGeneral" Style="{StaticResource NavButton}" Content="常规" Click="OnNavClick" Tag="general"/>
+        <Button x:Name="NavCapture" Style="{StaticResource NavButton}" Content="截图" Click="OnNavClick" Tag="capture"/>
+        <Button x:Name="NavNetSpeed" Style="{StaticResource NavButton}" Content="网速" Click="OnNavClick" Tag="netspeed"/>
+        <Button x:Name="NavTaskbar" Style="{StaticResource NavButton}" Content="任务栏效果" Click="OnNavClick" Tag="taskbar"/>
+        <Button x:Name="NavAdvanced" Style="{StaticResource NavButton}" Content="高级" Click="OnNavClick" Tag="advanced"/>
+      </StackPanel>
+    </Border>
+
+    <Border Grid.Row="0" Grid.Column="1" Grid.RowSpan="2" Background="{DynamicResource LineBrush}"/>
+
+    <!-- Content pages: only one visible -->
+    <Grid Grid.Row="0" Grid.Column="2" Background="{DynamicResource SetSurfaceBrush}">
+      <!-- 常规 -->
+      <ScrollViewer x:Name="PageGeneral" VerticalScrollBarVisibility="Auto" Padding="20">
+        <StackPanel>
+          <TextBlock Style="{StaticResource PageTitle}" Text="常规"/>
+          <Border Style="{StaticResource PageTitleHairline}"/>
+          <CheckBox x:Name="StartWithWindowsBox" Content="登录时启动 Suite" Margin="0,0,0,8"
+                    Foreground="{DynamicResource InkSecondaryBrush}"
+                    Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+          <Button Content="切换系统深浅色" HorizontalAlignment="Left" Padding="10,4" Click="OnToggleTheme"/>
+          <TextBlock Style="{StaticResource HelpText}"
+                     Text="主入口在托盘右键。这里也可以切。改的是系统应用和任务栏的浅/深色，不是任务栏亚克力。不结束 explorer。若本机还在跑 Auto Dark Mode，两程序会抢。"/>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- 截图 -->
+      <ScrollViewer x:Name="PageCapture" VerticalScrollBarVisibility="Auto" Padding="20" Visibility="Collapsed">
+        <StackPanel>
+          <TextBlock Style="{StaticResource PageTitle}" Text="截图"/>
+          <Border Style="{StaticResource PageTitleHairline}"/>
+          <WrapPanel Margin="0,0,0,8">
+            <CheckBox x:Name="CtrlBox" Content="Ctrl" Margin="0,0,12,0" Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+            <CheckBox x:Name="ShiftBox" Content="Shift" Margin="0,0,12,0" Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+            <CheckBox x:Name="AltBox" Content="Alt" Margin="0,0,12,0" Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+            <CheckBox x:Name="WinBox" Content="Win" Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+          </WrapPanel>
+          <ComboBox x:Name="KeyBox" Margin="0,0,0,6" SelectionChanged="OnSelectionChanged"/>
+          <TextBlock x:Name="HotkeyHelpText" Style="{StaticResource HelpText}" Margin="0,0,0,6"
+                     Text="默认 F1。失败会提示占用原因，并建议空闲 F 键。不会反复抢键。"/>
+          <DockPanel x:Name="HotkeyConflictRow" Margin="0,0,0,6" Visibility="Collapsed">
+            <Button DockPanel.Dock="Right" Content="试用下一可用键" Padding="10,4" Margin="8,0,0,0"
+                    Click="OnTryNextHotkey"/>
+            <TextBlock x:Name="HotkeySuggestText" Style="{StaticResource HelpText}" TextWrapping="Wrap"
+                       VerticalAlignment="Center"/>
+          </DockPanel>
+          <CheckBox x:Name="SaveFileBox" Content="截完后保存 PNG 文件" Margin="0,0,0,6"
+                    Foreground="{DynamicResource InkSecondaryBrush}"
+                    Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+          <DockPanel x:Name="SaveDirectoryRow" Margin="0,0,0,6">
+            <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="保存目录"/>
+            <TextBox x:Name="SaveDirectoryBox" LostFocus="OnTextLostFocus"/>
+          </DockPanel>
+          <TextBlock x:Name="SaveDirectoryHint" Style="{StaticResource HelpText}" Margin="0,0,0,6"/>
+          <CheckBox x:Name="PinAfterBox" Content="截完后自动钉成贴图" Margin="0,0,0,0"
+                    Foreground="{DynamicResource InkSecondaryBrush}"
+                    Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+          <TextBlock Style="{StaticResource HelpText}"
+                     Text="默认松手先出工具栏。勾上才松手立刻 1:1 钉在选区上并写入剪贴板。Esc 仍整次取消。"/>
+          <CheckBox x:Name="ShowMagnifierBox" Content="显示放大镜" Margin="0,8,0,0"
+                    Foreground="{DynamicResource InkSecondaryBrush}"
+                    Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+          <TextBlock Style="{StaticResource HelpText}" Text="选区拖中时在光标旁放大。可关。"/>
+          <CheckBox x:Name="HistoryEnabledBox" Content="保留截图历史" Margin="0,8,0,0"
+                    Foreground="{DynamicResource InkSecondaryBrush}"
+                    Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+          <Button Content="打开截图历史" HorizontalAlignment="Left" Padding="10,4" Margin="0,8,0,0"
+                  Click="OnOpenHistory"/>
+          <TextBlock x:Name="HistoryPathHint" Style="{StaticResource HelpText}"
+                     Text="历史在保存目录下的 History 文件夹。"/>
+          <TextBlock Style="{StaticResource HelpText}" Margin="0,8,0,0" Text="取色热键（默认 F2）"/>
+          <ComboBox x:Name="ColorPickKeyBox" Margin="0,4,0,0" SelectionChanged="OnSelectionChanged"/>
+          <TextBlock Style="{StaticResource HelpText}" Margin="0,8,0,0" Text="贴图穿透热键（默认 Ctrl+Shift+Q）"/>
+          <TextBlock x:Name="ClickThroughHotkeyLabel" Style="{StaticResource HelpText}" Text="Ctrl+Shift+Q"/>
+          <Button Content="开始滚动长截图" HorizontalAlignment="Left" Padding="10,4" Margin="0,8,0,0"
+                  Click="OnStartScrollCapture"/>
+          <TextBlock Style="{StaticResource HelpText}" Text="从托盘也可开始。只滚一个窗口。"/>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- 网速 -->
+      <ScrollViewer x:Name="PageNetSpeed" VerticalScrollBarVisibility="Auto" Padding="20" Visibility="Collapsed">
+        <StackPanel>
+          <TextBlock Style="{StaticResource PageTitle}" Text="网速"/>
+          <Border Style="{StaticResource PageTitleHairline}"/>
+          <CheckBox x:Name="NetSpeedVisibleBox" Content="显示网速" Margin="0,0,0,8"
+                    Foreground="{DynamicResource InkSecondaryBrush}"
+                    Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+          <StackPanel x:Name="NetSpeedDetailsPanel">
+            <CheckBox x:Name="NetSpeedEmbedBox" Content="钉在任务栏" Margin="0,0,0,0"
+                      Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+            <TextBlock Style="{StaticResource HelpText}" Margin="0,4,0,8"
+                       Text="默认嵌进主任务栏。嵌不进去会告诉你，并改用可拖的桌面悬浮窗。取消勾选则只用悬浮窗。"/>
+            <DockPanel Margin="0,0,0,8">
+              <Button DockPanel.Dock="Right" Content="刷新" Width="72" Margin="8,0,0,0" Click="OnRefreshAdapters"/>
+              <ComboBox x:Name="AdapterBox" DisplayMemberPath="Display" SelectionChanged="OnSelectionChanged"/>
+            </DockPanel>
+
+            <!-- 显示 / 外观 -->
+            <Border Style="{StaticResource BlockHairline}"/>
+
+            <DockPanel Margin="0,0,0,0">
+              <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="字号"/>
+              <TextBlock DockPanel.Dock="Right" x:Name="FontSizeLabel" Text="13" Width="28" TextAlignment="Right" VerticalAlignment="Center"
+                         Foreground="{DynamicResource InkSecondaryBrush}"/>
+              <Slider x:Name="FontSizeSlider" Minimum="10" Maximum="18" TickFrequency="1" IsSnapToTickEnabled="True" Value="13" ValueChanged="OnFontSizeChanged"/>
+            </DockPanel>
+            <TextBlock Style="{StaticResource HelpText}" Margin="0,4,0,8"
+                       Text="只改任务栏里的字。桌面悬浮窗仍是 13。"/>
+
+            <CheckBox x:Name="ShowDownloadBox" Content="显示下行" Margin="0,0,0,8"
+                      Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnShowLineChanged" Unchecked="OnShowLineChanged"/>
+            <CheckBox x:Name="ShowUploadBox" Content="显示上行" Margin="0,0,0,8"
+                      Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnShowLineChanged" Unchecked="OnShowLineChanged"/>
+
+            <DockPanel Margin="0,0,0,8">
+              <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="下行颜色"/>
+              <Button DockPanel.Dock="Right" Content="选颜色" Width="72" Margin="8,0,0,0" Click="OnPickDownColor"/>
+              <Button DockPanel.Dock="Right" Content="默认" Width="56" Margin="8,0,0,0" Click="OnResetDownColor"/>
+              <Border x:Name="DownColorSwatch" Style="{StaticResource ColorSwatch}"/>
+            </DockPanel>
+            <DockPanel Margin="0,0,0,8">
+              <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="上行颜色"/>
+              <Button DockPanel.Dock="Right" Content="选颜色" Width="72" Margin="8,0,0,0" Click="OnPickUpColor"/>
+              <Button DockPanel.Dock="Right" Content="默认" Width="56" Margin="8,0,0,0" Click="OnResetUpColor"/>
+              <Border x:Name="UpColorSwatch" Style="{StaticResource ColorSwatch}"/>
+            </DockPanel>
+
+            <CheckBox x:Name="BackgroundTransparentBox" Content="背景透明" Margin="0,0,0,8"
+                      Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnBackgroundTransparentChanged" Unchecked="OnBackgroundTransparentChanged"/>
+            <DockPanel x:Name="BackgroundColorRow" Margin="0,0,0,8">
+              <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="背景颜色"/>
+              <Button DockPanel.Dock="Right" Content="选颜色" Width="72" Margin="8,0,0,0" Click="OnPickBackgroundColor"/>
+              <Border x:Name="BackgroundColorSwatch" Style="{StaticResource ColorSwatch}"/>
+            </DockPanel>
+
+            <CheckBox x:Name="ShowBorderBox" Content="显示边框" Margin="0,0,0,8"
+                      Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+            <CheckBox x:Name="TwoLineBox" Content="双行" Margin="0,0,0,8"
+                      Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+            <CheckBox x:Name="BoldBox" Content="加粗" Margin="0,0,0,8"
+                      Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+            <CheckBox x:Name="EmbedSecondaryBox" Content="在其它屏幕任务栏显示网速" Margin="0,0,0,0"
+                      Foreground="{DynamicResource InkSecondaryBrush}"
+                      Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+            <TextBlock x:Name="SecondaryHelp" Style="{StaticResource HelpText}" Margin="0,4,0,0"
+                       Text="主屏仍用上面的钉栏设置。副屏各钉一条；某屏钉失败会跳过该屏。"/>
+            <TextBlock Style="{StaticResource HelpText}" Margin="0,4,0,0"
+                       Text="任务栏嵌入时不可拖出槽；右键可选「改回桌面悬浮窗」。悬浮窗拖位会自动记住。"/>
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- 任务栏效果 -->
+      <ScrollViewer x:Name="PageTaskbar" VerticalScrollBarVisibility="Auto" Padding="20" Visibility="Collapsed">
+        <StackPanel>
+          <TextBlock Style="{StaticResource PageTitle}" Text="任务栏效果"/>
+          <Border Style="{StaticResource PageTitleHairline}"/>
+          <CheckBox x:Name="TaskbarFxEnabledBox" Content="启用任务栏效果" Margin="0,0,0,0"
+                    Foreground="{DynamicResource InkSecondaryBrush}"
+                    Checked="OnSettingChanged" Unchecked="OnSettingChanged"/>
+          <TextBlock Style="{StaticResource HelpText}" Margin="0,4,0,8"
+                     Text="与 Suite 同一进程内的任务栏效果模块。关掉后立刻恢复系统默认。不要结束 explorer。透明挂住时截图也可能一起挂（已知取舍）。"/>
+          <StackPanel x:Name="TaskbarFxDetailsPanel">
+            <DockPanel Margin="0,0,0,0">
+              <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="档位"/>
+              <ComboBox x:Name="TaskbarModeBox" DisplayMemberPath="Label" SelectionChanged="OnTaskbarModeChanged"/>
+            </DockPanel>
+            <TextBlock x:Name="TaskbarModeHelp" Style="{StaticResource HelpText}" Margin="0,4,0,8"
+                       Text="磨砂半透明。"/>
+            <DockPanel Margin="0,0,0,8">
+              <Button DockPanel.Dock="Right" Content="选颜色" Width="72" Margin="8,0,0,0" Click="OnPickTaskbarColor"/>
+              <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="颜色"/>
+              <TextBox x:Name="TaskbarArgbBox" Text="#CC1F1F1F" LostFocus="OnTextLostFocus"/>
+            </DockPanel>
+            <DockPanel x:Name="TaskbarAlphaRow" Margin="0,0,0,0">
+              <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="透明度"/>
+              <TextBlock DockPanel.Dock="Right" x:Name="TaskbarAlphaLabel" Text="204" Width="36" TextAlignment="Right" VerticalAlignment="Center"
+                         Foreground="{DynamicResource InkSecondaryBrush}"/>
+              <Slider x:Name="TaskbarAlphaSlider" Minimum="0" Maximum="255" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OnTaskbarAlphaChanged"/>
+            </DockPanel>
+            <TextBlock Style="{StaticResource HelpText}" Margin="0,4,0,8"
+                       Text="实色会忽略透明度。全透明和亚克力才用上面的透明度。"/>
+          </StackPanel>
+          <TextBlock x:Name="TaskbarFxStatus" Style="{StaticResource HelpText}" Margin="0,0,0,0"
+                     Text="任务栏效果已关闭。"/>
+          <TextBlock x:Name="LightTransparencyTip" Style="{StaticResource HelpText}" Margin="0,6,0,0"
+                     Visibility="Collapsed" TextWrapping="Wrap"
+                     Text="浅色主题下，透明任务栏上的网速可能看不清。可关「背景透明」、给下行/上行选深色，或把任务栏效果改成实色。"/>
+          <Button x:Name="UseAcrylicButton" Content="改用亚克力并加深网速字" HorizontalAlignment="Left"
+                  Padding="10,4" Margin="0,6,0,0" Visibility="Collapsed" Click="OnUseAcrylic"/>
+          <TextBlock x:Name="LastStartLabel" Style="{StaticResource HelpText}" Margin="0,6,0,0"
+                     Text="上次启动：正常"/>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- 高级 -->
+      <ScrollViewer x:Name="PageAdvanced" VerticalScrollBarVisibility="Auto" Padding="20" Visibility="Collapsed">
+        <StackPanel>
+          <TextBlock Style="{StaticResource PageTitle}" Text="高级"/>
+          <Border Style="{StaticResource PageTitleHairline}"/>
+          <TextBlock Text="Suite" Margin="0,0,0,0" Foreground="{DynamicResource InkBrush}" FontWeight="SemiBold"/>
+          <TextBlock Style="{StaticResource HelpText}"
+                     Text="托盘小工具。截完即钉、网速进任务栏。"/>
+          <DockPanel Margin="0,12,0,0">
+            <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="更新通道"/>
+            <ComboBox x:Name="UpdateChannelBox" SelectionChanged="OnSelectionChanged"/>
+          </DockPanel>
+          <Button Content="检查更新" HorizontalAlignment="Left" Padding="10,4" Margin="0,8,0,0"
+                  Click="OnCheckUpdates"/>
+          <CheckBox x:Name="LoggingBox" Content="写入调试日志" Margin="0,12,0,0"
+                    Foreground="{DynamicResource InkSecondaryBrush}"
+                    Checked="OnLoggingChanged" Unchecked="OnLoggingChanged"/>
+          <TextBlock x:Name="LoggingHelp" Style="{StaticResource HelpText}"
+                     Text="日志在 LocalAppData\Suite\logs。含一般操作，不含截图像素。"/>
+          <Button Content="打开日志文件夹" HorizontalAlignment="Left" Padding="10,4" Margin="0,8,0,0"
+                  Click="OnOpenLogs"/>
+          <Button Content="恢复默认设置" HorizontalAlignment="Left" Padding="10,4" Margin="0,8,0,0"
+                  Click="OnRestoreDefaults"/>
+          <TextBlock Style="{StaticResource HelpText}"
+                     Text="热键、截图、网速外观和任务栏效果回到默认。不会删已保存的截图文件。"/>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+
+    <!-- Footer -->
+    <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+            Background="{DynamicResource SetFooterBgBrush}"
+            BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="16,0">
+      <DockPanel LastChildFill="True">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="ApplyButton" Style="{StaticResource PrimaryButton}" Width="100" Content="立即保存" Margin="0,0,8,0" Click="OnApply"/>
+          <Button x:Name="CloseButton" Style="{StaticResource PrimaryButton}" Width="88" Content="关闭" IsCancel="True" Click="OnClose"/>
+        </StackPanel>
+        <TextBlock x:Name="StatusText" VerticalAlignment="Center"
+                   FontSize="12" Foreground="{DynamicResource StatusBrush}" Text=""/>
+      </DockPanel>
+    </Border>
+  </Grid>
+</Window>
