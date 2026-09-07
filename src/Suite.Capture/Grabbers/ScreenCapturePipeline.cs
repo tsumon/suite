@@ -2,26 +2,46 @@ namespace Suite.Capture.Grabbers;
 
 internal static class ScreenCapturePipeline
 {
-    // Order is ADR §3.3. Protected windows (SetWindowDisplayAffinity) may appear black; do not bypass.
+    // Prefer GDI / DXGI first to avoid Win11 GraphicsCapture yellow-border flash.
+    // GraphicsCapture last — for affinity-protected windows when others fail.
     public static MonitorCapture Capture(MonitorInfo monitor)
     {
-        if (GraphicsCaptureGrabber.TryCapture(monitor, out PixelBuffer? buffer) && buffer is not null)
+        try
         {
-            return new MonitorCapture
+            PixelBuffer gdi = GdiBitBltGrabber.Capture(monitor);
+            if (gdi.Width > 0 && gdi.Height > 0)
             {
-                Monitor = monitor,
-                Buffer = buffer,
-                Method = CaptureMethod.GraphicsCapture,
-            };
+                return new MonitorCapture
+                {
+                    Monitor = monitor,
+                    Buffer = gdi,
+                    Method = CaptureMethod.GdiBitBlt,
+                };
+            }
+
+            gdi.ReleasePixels();
+        }
+        catch
+        {
         }
 
-        if (DxgiDuplicationGrabber.TryCapture(monitor, out buffer) && buffer is not null)
+        if (DxgiDuplicationGrabber.TryCapture(monitor, out PixelBuffer? buffer) && buffer is not null)
         {
             return new MonitorCapture
             {
                 Monitor = monitor,
                 Buffer = buffer,
                 Method = CaptureMethod.DxgiDuplication,
+            };
+        }
+
+        if (GraphicsCaptureGrabber.TryCapture(monitor, out buffer) && buffer is not null)
+        {
+            return new MonitorCapture
+            {
+                Monitor = monitor,
+                Buffer = buffer,
+                Method = CaptureMethod.GraphicsCapture,
             };
         }
 

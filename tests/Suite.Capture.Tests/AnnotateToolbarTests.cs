@@ -118,4 +118,54 @@ public sealed class AnnotateToolbarTests
             workLeft: 0, workTop: 0, workRight: 400, workBottom: 1080);
         Assert.Equal(0, place.Left);
     }
+
+    [Fact]
+    public void ShowsPropertyBar_for_drawing_tools_only()
+    {
+        Assert.True(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Curve));
+        Assert.True(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Shape));
+        Assert.True(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Pencil));
+        Assert.True(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Marker));
+        Assert.True(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Mosaic));
+        Assert.True(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Text));
+        Assert.True(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Eraser));
+        Assert.False(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Ocr));
+        Assert.False(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Pick));
+        Assert.False(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Undo));
+        Assert.False(AnnotateToolbar.ShowsPropertyBar(AnnotateTool.Copy));
+    }
+
+    [Fact]
+    public void PlaceStack_puts_sub_under_main_when_below_selection()
+    {
+        AnnotateToolbar.StackPlacement place = AnnotateToolbar.PlaceStack(
+            selLeft: 100, selTop: 100, selWidth: 400, selHeight: 200,
+            barWidth: 500, mainHeight: 40, subHeight: 36, showSub: true,
+            workLeft: 0, workTop: 0, workRight: 1920, workBottom: 1080);
+        Assert.False(place.Above);
+        Assert.True(place.SubVisible);
+        Assert.Equal(100 + 200 + 8, place.MainTop);
+        Assert.Equal(place.MainTop + 40 + AnnotateToolbar.SubBarGap, place.SubTop);
+    }
+
+    [Fact]
+    public void PlaceStack_puts_sub_above_main_when_stack_flips_above()
+    {
+        AnnotateToolbar.StackPlacement place = AnnotateToolbar.PlaceStack(
+            selLeft: 100, selTop: 1000, selWidth: 200, selHeight: 50,
+            barWidth: 500, mainHeight: 40, subHeight: 36, showSub: true,
+            workLeft: 0, workTop: 0, workRight: 1920, workBottom: 1080);
+        Assert.True(place.Above);
+        Assert.True(place.SubVisible);
+        Assert.True(place.SubTop < place.MainTop);
+        Assert.Equal(place.SubTop + 36 + AnnotateToolbar.SubBarGap, place.MainTop);
+    }
+
+    [Fact]
+    public void Palette_has_at_least_six_swatches_including_red()
+    {
+        Assert.True(AnnotateToolbar.Palette.Length >= 6);
+        Assert.Contains(AnnotateToolbar.Palette, c => c.R == 0xDC && c.G == 0x28 && c.B == 0x28);
+    }
+
 }

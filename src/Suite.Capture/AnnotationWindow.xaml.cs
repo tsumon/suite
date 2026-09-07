@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Threading;
 using Suite.Capture.Ocr;
 using System.Windows;
 using System.Windows.Controls;
@@ -21,6 +22,11 @@ public partial class AnnotationWindow : Window
     private static readonly Brush AnchorFill = Freeze(Colors.White);
     private static readonly Brush ChipBg = Freeze(Color.FromArgb(0xCC, 0, 0, 0));
     private static readonly Brush DimBrush = Freeze(Color.FromArgb(0x6E, 0, 0, 0));
+    private static readonly Brush SubBarBg = Freeze(Color.FromRgb(0x2B, 0x2B, 0x2B));
+    private static readonly Brush SubBarChipBg = Freeze(Color.FromRgb(0x3A, 0x3A, 0x3A));
+    private static readonly Brush SubBarChipOn = Freeze(Color.FromRgb(0x55, 0x55, 0x55));
+    private static readonly Brush SubBarInk = Freeze(Color.FromRgb(0xEE, 0xEE, 0xEE));
+    private static readonly Brush SubBarSep = Freeze(Color.FromRgb(0x66, 0x66, 0x66));
 
     private IReadOnlyList<MonitorCapture> _frames;
     private readonly MonitorInfo _monitor;
@@ -39,6 +45,22 @@ public partial class AnnotationWindow : Window
     private PixelRect _selection;
     private AnnotateTool? _tool;
     private bool _ellipse;
+    private CurveStyle _curveStyle = CurveStyle.Solid;
+    private bool _arrowAtEnd = true;
+    private byte _strokeB = PixelDraw.StrokeB;
+    private byte _strokeG = PixelDraw.StrokeG;
+    private byte _strokeR = PixelDraw.StrokeR;
+    private int _strokeThickness = 4;
+    private int _markerThickness = 14;
+    private int _mosaicRadius = 16;
+    private int _eraserThickness = 18;
+    private int _textSize = 18;
+    private Polyline? _arrowHeadDraft;
+    private PixelBuffer? _mosaicDraft;
+    private int _mosaicDraftLast = -1;
+    private readonly Border _statusChip = new();
+    private readonly TextBlock _statusText = new();
+    private CancellationTokenSource? _statusHideCts;
     private bool _dragging;
     private bool _resizing;
     private bool _moving;
@@ -57,6 +79,8 @@ public partial class AnnotationWindow : Window
     private readonly TextBox _textEntry = new();
     private readonly Rectangle _border = new();
     private readonly Border _toolbar = new();
+    private readonly Border _subBar = new();
+    private double _cachedSubBarW = 120;
     private readonly Border _sizeChip = new();
     private readonly TextBlock _sizeText = new();
     private readonly Rectangle _dimTop = new();
@@ -86,6 +110,8 @@ public partial class AnnotationWindow : Window
     // Full-monitor frozen screenshot (Snipaste-like). Dim hole reveals live viewport during drag.
     private readonly Image _freezeImage = new();
     private BitmapSource? _freezeSource;
+    /// <summary>Reused preview surface — mosaic stamps / RefreshPreview must not allocate a new frozen BitmapSource each move.</summary>
+    private WriteableBitmap? _previewBmp;
     private bool _liveViewport;
 
     internal AnnotationWindow(
@@ -145,12 +171,19 @@ public partial class AnnotationWindow : Window
         _cachedBake = null;
         _original.ReleasePixels();
         _bakeDirty = true;
+        _ops.Clear();
+        _redo.Clear();
+        _stroke = null;
 
-        // Full-monitor freeze + live-viewport preview hold large frozen BitmapSources — drop on close/cancel/commit.
+        // Full-monitor freeze + live-viewport preview hold large BitmapSources — drop on close/cancel/commit.
         _freezeImage.Source = null;
         _freezeSource = null;
         _preview.Source = null;
+        _previewBmp = null;
         _draftLayer.Children.Clear();
+        _draft = null;
+        _arrowHeadDraft = null;
+        ReleaseMosaicDraft();
         _liveViewport = false;
     }
 
@@ -234,6 +267,8 @@ public partial class AnnotationWindow : Window
         Root.Children.Add(_border);
         Root.Children.Add(_sizeChip);
         Root.Children.Add(_toolbar);
+        Root.Children.Add(_subBar);
+        Root.Children.Add(_statusChip);
         foreach (Ellipse dot in _anchors)
         {
             Root.Children.Add(dot);
@@ -272,7 +307,321 @@ public partial class AnnotationWindow : Window
         }
 
         _toolbar.Child = row;
+        BuildSubBarShell();
+        BuildStatusChip();
         RefreshHistory();
+        RefreshSubBar();
+    }
+
+    private void BuildSubBarShell()
+    {
+        _subBar.Background = SubBarBg;
+        _subBar.BorderBrush = Freeze(Color.FromRgb(0x1A, 0x1A, 0x1A));
+        _subBar.BorderThickness = new Thickness(1);
+        _subBar.CornerRadius = new CornerRadius(2);
+        _subBar.Height = AnnotateToolbar.SubBarHeight;
+        _subBar.Padding = new Thickness(8, 4, 8, 4);
+        _subBar.Visibility = Visibility.Collapsed;
+        _subBar.Child = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+    }
+
+    private void RefreshSubBar()
+    {
+        bool show = _tool is AnnotateTool t && AnnotateToolbar.ShowsPropertyBar(t);
+        if (!show)
+        {
+            _subBar.Visibility = Visibility.Collapsed;
+            _subBar.Child = null;
+            return;
+        }
+
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        switch (_tool)
+        {
+            case AnnotateTool.Curve:
+                AddColorSwatches(row);
+                AddSep(row);
+                AddThicknessChips(row, AnnotateToolbar.ThicknessChips, _strokeThickness, v => _strokeThickness = v);
+                AddSep(row);
+                AddCurveStyleChips(row);
+                if (_curveStyle == CurveStyle.Arrow)
+                {
+                    AddSep(row);
+                    AddArrowDirChips(row);
+                }
+                break;
+            case AnnotateTool.Shape:
+                AddColorSwatches(row);
+                AddSep(row);
+                AddThicknessChips(row, AnnotateToolbar.ThicknessChips, _strokeThickness, v => _strokeThickness = v);
+                AddSep(row);
+                AddShapeKindChips(row);
+                break;
+            case AnnotateTool.Pencil:
+                AddColorSwatches(row);
+                AddSep(row);
+                AddThicknessChips(row, AnnotateToolbar.ThicknessChips, _strokeThickness, v => _strokeThickness = v);
+                break;
+            case AnnotateTool.Marker:
+                AddColorSwatches(row);
+                AddSep(row);
+                AddThicknessChips(row, AnnotateToolbar.MarkerThicknessChips, _markerThickness, v => _markerThickness = v);
+                break;
+            case AnnotateTool.Text:
+                AddColorSwatches(row);
+                AddSep(row);
+                AddThicknessChips(row, AnnotateToolbar.TextSizeChips, _textSize, v =>
+                {
+                    _textSize = v;
+                    _textEntry.FontSize = v;
+                }, labelAsSize: true);
+                SyncTextEntryInk();
+                break;
+            case AnnotateTool.Mosaic:
+                AddThicknessChips(row, AnnotateToolbar.MosaicRadiusChips, _mosaicRadius, v => _mosaicRadius = v, tipPrefix: "笔刷");
+                break;
+            case AnnotateTool.Eraser:
+                AddThicknessChips(row, AnnotateToolbar.EraserThicknessChips, _eraserThickness, v => _eraserThickness = v, tipPrefix: "橡皮");
+                break;
+        }
+
+        _subBar.Child = row;
+        _subBar.Visibility = Visibility.Visible;
+        _subBar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        _cachedSubBarW = Math.Max(80, _subBar.DesiredSize.Width);
+    }
+
+    private void AddSep(StackPanel row)
+    {
+        row.Children.Add(new Border
+        {
+            Width = 8,
+            Height = 20,
+            Child = new Rectangle
+            {
+                Width = 1,
+                Height = 14,
+                Fill = SubBarSep,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        });
+    }
+
+    private void AddColorSwatches(StackPanel row)
+    {
+        foreach ((byte R, byte G, byte B) rgb in AnnotateToolbar.Palette)
+        {
+            byte b = rgb.B, g = rgb.G, r = rgb.R;
+            bool on = _strokeB == b && _strokeG == g && _strokeR == r;
+            var swatch = new Border
+            {
+                Width = 18,
+                Height = 18,
+                Margin = new Thickness(3, 0, 3, 0),
+                CornerRadius = new CornerRadius(2),
+                Background = Freeze(Color.FromRgb(r, g, b)),
+                BorderBrush = on ? Freeze(Color.FromRgb(0x4F, 0xC3, 0xF7)) : Freeze(Color.FromRgb(0x88, 0x88, 0x88)),
+                BorderThickness = new Thickness(on ? 2 : 1),
+                Cursor = Cursors.Hand,
+                ToolTip = $"#{r:X2}{g:X2}{b:X2}",
+            };
+            swatch.MouseLeftButtonDown += (_, e) =>
+            {
+                _strokeB = b;
+                _strokeG = g;
+                _strokeR = r;
+                SyncTextEntryInk();
+                RefreshSubBar();
+                e.Handled = true;
+            };
+            row.Children.Add(swatch);
+        }
+    }
+
+    private void AddThicknessChips(
+        StackPanel row,
+        int[] chips,
+        int current,
+        Action<int> set,
+        string tipPrefix = "粗细",
+        bool labelAsSize = false)
+    {
+        string[] labels = labelAsSize ? ["小", "中", "大"] : ["细", "中", "粗"];
+        for (int i = 0; i < chips.Length; i++)
+        {
+            int value = chips[i];
+            string label = i < labels.Length ? labels[i] : value.ToString();
+            bool on = current == value;
+            Button btn = MakeSubChip(label, on, $"{tipPrefix} {value}");
+            btn.Click += (_, _) =>
+            {
+                set(value);
+                RefreshSubBar();
+            };
+            row.Children.Add(btn);
+        }
+    }
+
+    private void AddCurveStyleChips(StackPanel row)
+    {
+        void Add(string label, CurveStyle style)
+        {
+            bool on = _curveStyle == style;
+            Button btn = MakeSubChip(label, on, label);
+            btn.Click += (_, _) =>
+            {
+                _curveStyle = style;
+                RefreshSubBar();
+                LayoutChrome(rebakePreview: false);
+            };
+            row.Children.Add(btn);
+        }
+
+        Add("实线", CurveStyle.Solid);
+        Add("虚线", CurveStyle.Dashed);
+        Add("箭头", CurveStyle.Arrow);
+    }
+
+    private void AddArrowDirChips(StackPanel row)
+    {
+        Button endBtn = MakeSubChip("→末", _arrowAtEnd, "箭头在终点");
+        endBtn.Click += (_, _) =>
+        {
+            _arrowAtEnd = true;
+            RefreshSubBar();
+        };
+        Button startBtn = MakeSubChip("←始", !_arrowAtEnd, "箭头在起点");
+        startBtn.Click += (_, _) =>
+        {
+            _arrowAtEnd = false;
+            RefreshSubBar();
+        };
+        row.Children.Add(endBtn);
+        row.Children.Add(startBtn);
+    }
+
+    private void AddShapeKindChips(StackPanel row)
+    {
+        Button rect = MakeSubChip("矩形", !_ellipse, "矩形");
+        rect.Click += (_, _) =>
+        {
+            _ellipse = false;
+            RefreshSubBar();
+        };
+        Button ell = MakeSubChip("椭圆", _ellipse, "椭圆");
+        ell.Click += (_, _) =>
+        {
+            _ellipse = true;
+            RefreshSubBar();
+        };
+        row.Children.Add(rect);
+        row.Children.Add(ell);
+    }
+
+    private Button MakeSubChip(string text, bool on, string tip)
+    {
+        var btn = new Button
+        {
+            Content = text,
+            FontSize = 11,
+            FontFamily = new FontFamily("Microsoft YaHei UI, Segoe UI"),
+            Foreground = SubBarInk,
+            Background = on ? SubBarChipOn : SubBarChipBg,
+            BorderBrush = on ? Freeze(Color.FromRgb(0x4F, 0xC3, 0xF7)) : SubBarSep,
+            BorderThickness = new Thickness(on ? 1.5 : 1),
+            Padding = new Thickness(8, 2, 8, 2),
+            Margin = new Thickness(2, 0, 2, 0),
+            MinWidth = 36,
+            Height = 24,
+            Focusable = false,
+            Cursor = Cursors.Hand,
+            ToolTip = tip,
+        };
+        btn.Template = BuildSubChipTemplate();
+        return btn;
+    }
+
+    private static ControlTemplate BuildSubChipTemplate()
+    {
+        var template = new ControlTemplate(typeof(Button));
+        var border = new FrameworkElementFactory(typeof(Border));
+        border.Name = "Bd";
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(3));
+        border.SetValue(Border.SnapsToDevicePixelsProperty, true);
+        border.SetBinding(
+            Border.BackgroundProperty,
+            new System.Windows.Data.Binding(Button.BackgroundProperty.Name)
+            {
+                RelativeSource = new System.Windows.Data.RelativeSource(
+                    System.Windows.Data.RelativeSourceMode.TemplatedParent),
+            });
+        border.SetBinding(
+            Border.BorderBrushProperty,
+            new System.Windows.Data.Binding(Button.BorderBrushProperty.Name)
+            {
+                RelativeSource = new System.Windows.Data.RelativeSource(
+                    System.Windows.Data.RelativeSourceMode.TemplatedParent),
+            });
+        border.SetBinding(
+            Border.BorderThicknessProperty,
+            new System.Windows.Data.Binding(Button.BorderThicknessProperty.Name)
+            {
+                RelativeSource = new System.Windows.Data.RelativeSource(
+                    System.Windows.Data.RelativeSourceMode.TemplatedParent),
+            });
+        border.SetBinding(
+            Border.PaddingProperty,
+            new System.Windows.Data.Binding(Button.PaddingProperty.Name)
+            {
+                RelativeSource = new System.Windows.Data.RelativeSource(
+                    System.Windows.Data.RelativeSourceMode.TemplatedParent),
+            });
+        var presenter = new FrameworkElementFactory(typeof(ContentPresenter));
+        presenter.SetValue(HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        presenter.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
+        border.AppendChild(presenter);
+        template.VisualTree = border;
+        return template;
+    }
+
+    private void SyncTextEntryInk()
+    {
+        var ink = new SolidColorBrush(Color.FromRgb(_strokeR, _strokeG, _strokeB));
+        ink.Freeze();
+        _textEntry.Foreground = ink;
+        _textEntry.BorderBrush = ink;
+        _textEntry.FontSize = _textSize;
+    }
+
+    private SolidColorBrush StrokeBrush(byte alpha = 255)
+    {
+        var brush = new SolidColorBrush(Color.FromArgb(alpha, _strokeR, _strokeG, _strokeB));
+        brush.Freeze();
+        return brush;
+    }
+
+    private void BuildStatusChip()
+    {
+        _statusText.Foreground = Brushes.White;
+        _statusText.FontSize = 12;
+        _statusText.Margin = new Thickness(8, 4, 8, 4);
+        _statusText.TextWrapping = TextWrapping.Wrap;
+        _statusChip.Background = ChipBg;
+        _statusChip.CornerRadius = new CornerRadius(3);
+        _statusChip.Child = _statusText;
+        _statusChip.Visibility = Visibility.Collapsed;
+        _statusChip.IsHitTestVisible = false;
+        _statusChip.MaxWidth = 320;
     }
 
     private static FrameworkElement MakeSeparator()
@@ -313,6 +662,32 @@ public partial class AnnotationWindow : Window
             };
             menu.Items.Add(rect);
             menu.Items.Add(ell);
+            button.ContextMenu = menu;
+        }
+        else if (tool == AnnotateTool.Curve)
+        {
+            var menu = new ContextMenu();
+            var solid = new MenuItem { Header = "实线" };
+            solid.Click += (_, _) =>
+            {
+                _curveStyle = CurveStyle.Solid;
+                SelectTool(AnnotateTool.Curve);
+            };
+            var dashed = new MenuItem { Header = "虚线" };
+            dashed.Click += (_, _) =>
+            {
+                _curveStyle = CurveStyle.Dashed;
+                SelectTool(AnnotateTool.Curve);
+            };
+            var arrow = new MenuItem { Header = "箭头" };
+            arrow.Click += (_, _) =>
+            {
+                _curveStyle = CurveStyle.Arrow;
+                SelectTool(AnnotateTool.Curve);
+            };
+            menu.Items.Add(solid);
+            menu.Items.Add(dashed);
+            menu.Items.Add(arrow);
             button.ContextMenu = menu;
         }
 
@@ -366,6 +741,8 @@ public partial class AnnotationWindow : Window
         }
 
         RefreshHostCursor();
+        RefreshSubBar();
+        LayoutChrome(rebakePreview: false);
     }
 
     private void RefreshHostCursor() =>
@@ -461,7 +838,7 @@ public partial class AnnotationWindow : Window
 
         if (rebakePreview)
         {
-            _preview.Source = Bake().ToBitmapSource();
+            PresentBuffer(Bake());
         }
 
         _preview.Width = selW;
@@ -505,6 +882,11 @@ public partial class AnnotationWindow : Window
         {
             _toolbar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             _cachedBarW = Math.Max(120, _toolbar.DesiredSize.Width);
+            if (_subBar.Visibility == Visibility.Visible)
+            {
+                _subBar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                _cachedSubBarW = Math.Max(80, _subBar.DesiredSize.Width);
+            }
         }
     }
 
@@ -514,13 +896,24 @@ public partial class AnnotationWindow : Window
     {
         double chipW = _cachedChipW;
         double chipH = _cachedChipH;
-        double barW = _cachedBarW;
-        double barH = AnnotateToolbar.Height;
+        bool showSub = _subBar.Visibility == Visibility.Visible;
+        double barW = showSub ? Math.Max(_cachedBarW, _cachedSubBarW) : _cachedBarW;
+        double mainH = AnnotateToolbar.Height;
+        double subH = AnnotateToolbar.SubBarHeight;
 
-        AnnotateToolbar.Placement place = AnnotateToolbar.Place(
-            selL, selT, selW, selH, barW, barH, workL, workT, workR, workB);
+        AnnotateToolbar.StackPlacement place = AnnotateToolbar.PlaceStack(
+            selL, selT, selW, selH,
+            barW, mainH, subH, showSub,
+            workL, workT, workR, workB);
         Canvas.SetLeft(_toolbar, place.Left);
-        Canvas.SetTop(_toolbar, place.Top);
+        Canvas.SetTop(_toolbar, place.MainTop);
+        if (showSub)
+        {
+            Canvas.SetLeft(_subBar, place.Left);
+            Canvas.SetTop(_subBar, place.SubTop);
+        }
+
+        PlaceStatusChip();
 
         double chipX = selL + ((selW - chipW) / 2);
         double chipY = selT - chipH - 2;
@@ -581,6 +974,7 @@ public partial class AnnotationWindow : Window
         _border.RenderTransform = _liveTx;
         _sizeChip.RenderTransform = _liveTx;
         _toolbar.RenderTransform = _liveTx;
+        _subBar.RenderTransform = _liveTx;
         foreach (Ellipse dot in _anchors)
         {
             dot.RenderTransform = _liveTx;
@@ -604,6 +998,7 @@ public partial class AnnotationWindow : Window
         _border.RenderTransform = null;
         _sizeChip.RenderTransform = null;
         _toolbar.RenderTransform = null;
+        _subBar.RenderTransform = null;
         foreach (Ellipse dot in _anchors)
         {
             dot.RenderTransform = null;
@@ -905,37 +1300,95 @@ public partial class AnnotationWindow : Window
 
         _dragging = true;
         _startDip = pos;
-        _stroke = [(ToPxX(pos.X), ToPxY(pos.Y))];
+        int px = ToPxX(pos.X);
+        int py = ToPxY(pos.Y);
+        _stroke = [(px, py)];
         _imageHost.CaptureMouse();
         _draftLayer.Children.Clear();
+        _arrowHeadDraft = null;
+        ReleaseMosaicDraft();
+
+        if (_tool == AnnotateTool.Mosaic)
+        {
+            _mosaicDraft = Bake().Clone();
+            _mosaicDraftLast = 0;
+            PixelDraw.MosaicStamp(_mosaicDraft, px, py, _mosaicRadius);
+            PresentBuffer(_mosaicDraft);
+            _draft = null;
+            e.Handled = true;
+            return;
+        }
+
         if (_tool is AnnotateTool.Pencil or AnnotateTool.Marker or AnnotateTool.Eraser or AnnotateTool.Curve)
         {
+            double thick = _tool switch
+            {
+                AnnotateTool.Marker => _markerThickness,
+                AnnotateTool.Eraser => _eraserThickness,
+                AnnotateTool.Curve => _strokeThickness,
+                _ => Math.Max(1, _strokeThickness - 1),
+            };
+            Brush stroke = _tool == AnnotateTool.Eraser
+                ? Freeze(Color.FromArgb(0x90, 0xFF, 0xFF, 0xFF))
+                : _tool == AnnotateTool.Marker
+                    ? StrokeBrush(0x70)
+                    : StrokeBrush();
             var line = new Polyline
             {
-                Stroke = _tool == AnnotateTool.Marker
-                    ? new SolidColorBrush(Color.FromArgb(0x70, 0xDC, 0x28, 0x28))
-                    : Brushes.OrangeRed,
-                StrokeThickness = _tool == AnnotateTool.Marker ? 12 : _tool == AnnotateTool.Eraser ? 16 : 2,
+                Stroke = stroke,
+                StrokeThickness = thick,
                 StrokeLineJoin = PenLineJoin.Round,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
             };
+            if (_tool == AnnotateTool.Curve && _curveStyle == CurveStyle.Dashed)
+            {
+                line.StrokeDashArray = new DoubleCollection { 4, 3 };
+            }
+
             line.Points.Add(pos);
             _draft = line;
+            if (_tool == AnnotateTool.Curve && _curveStyle == CurveStyle.Arrow)
+            {
+                _arrowHeadDraft = new Polyline
+                {
+                    Stroke = StrokeBrush(),
+                    StrokeThickness = _strokeThickness,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    StrokeStartLineCap = PenLineCap.Round,
+                    StrokeEndLineCap = PenLineCap.Round,
+                };
+                _draftLayer.Children.Add(_arrowHeadDraft);
+            }
         }
         else
         {
+            // Shape rubber-band
             _draft = new System.Windows.Shapes.Rectangle
             {
-                Stroke = Brushes.OrangeRed,
-                StrokeThickness = 2,
+                Stroke = StrokeBrush(),
+                StrokeThickness = Math.Max(1, _strokeThickness * _dipX),
                 Fill = Brushes.Transparent,
             };
+            if (_ellipse)
+            {
+                _draft = new System.Windows.Shapes.Ellipse
+                {
+                    Stroke = StrokeBrush(),
+                    StrokeThickness = Math.Max(1, _strokeThickness * _dipX),
+                    Fill = Brushes.Transparent,
+                };
+            }
+
             Canvas.SetLeft(_draft, pos.X);
             Canvas.SetTop(_draft, pos.Y);
         }
 
-        _draftLayer.Children.Add(_draft);
+        if (_draft is not null)
+        {
+            _draftLayer.Children.Add(_draft);
+        }
+
         e.Handled = true;
     }
 
@@ -967,13 +1420,35 @@ public partial class AnnotationWindow : Window
             return;
         }
 
-        if (!_dragging || _draft is null)
+        if (!_dragging)
         {
             return;
         }
 
         Point pos = e.GetPosition(_preview);
-        _stroke?.Add((ToPxX(pos.X), ToPxY(pos.Y)));
+        int px = ToPxX(pos.X);
+        int py = ToPxY(pos.Y);
+        _stroke?.Add((px, py));
+
+        if (_tool == AnnotateTool.Mosaic && _mosaicDraft is not null && _stroke is not null)
+        {
+            int from = Math.Max(0, _mosaicDraftLast);
+            if (from < _stroke.Count - 1)
+            {
+                var segment = _stroke.GetRange(from, _stroke.Count - from);
+                PixelDraw.MosaicBrush(_mosaicDraft, segment, _mosaicRadius);
+                _mosaicDraftLast = _stroke.Count - 1;
+                PresentBuffer(_mosaicDraft);
+            }
+
+            return;
+        }
+
+        if (_draft is null)
+        {
+            return;
+        }
+
         if (_draft is Polyline poly)
         {
             poly.Points.Add(pos);
@@ -983,6 +1458,11 @@ public partial class AnnotationWindow : Window
                 while (poly.Points.Count > 2)
                 {
                     poly.Points.RemoveAt(2);
+                }
+
+                if (_curveStyle == CurveStyle.Arrow && _arrowHeadDraft is not null)
+                {
+                    UpdateArrowHeadDraft(_startDip, pos);
                 }
             }
 
@@ -1059,8 +1539,22 @@ public partial class AnnotationWindow : Window
         Point pos = e.GetPosition(_preview);
         _draftLayer.Children.Clear();
         _draft = null;
+        _arrowHeadDraft = null;
         IReadOnlyList<(int X, int Y)> stroke = _stroke ?? [];
         _stroke = null;
+
+        if (_tool == AnnotateTool.Mosaic)
+        {
+            ReleaseMosaicDraft();
+            if (stroke.Count == 0)
+            {
+                RefreshPreview();
+                return;
+            }
+
+            Push(new MosaicStrokeOp(stroke, _mosaicRadius));
+            return;
+        }
 
         if (_tool is AnnotateTool.Pencil or AnnotateTool.Marker or AnnotateTool.Eraser)
         {
@@ -1071,15 +1565,15 @@ public partial class AnnotationWindow : Window
 
             if (_tool == AnnotateTool.Eraser)
             {
-                Push(new EraseOp(stroke, 18));
+                Push(new EraseOp(stroke, _eraserThickness));
             }
             else if (_tool == AnnotateTool.Marker)
             {
-                Push(new StrokeOp(stroke, 14, 40, 40, 220, 110));
+                Push(new StrokeOp(stroke, _markerThickness, _strokeB, _strokeG, _strokeR, 110));
             }
             else
             {
-                Push(new StrokeOp(stroke, 2, PixelDraw.StrokeB, PixelDraw.StrokeG, PixelDraw.StrokeR, 255));
+                Push(new StrokeOp(stroke, Math.Max(1, _strokeThickness - 1), _strokeB, _strokeG, _strokeR, 255));
             }
 
             return;
@@ -1087,13 +1581,44 @@ public partial class AnnotationWindow : Window
 
         if (_tool == AnnotateTool.Curve)
         {
-            Push(new StrokeOp(
-                [(ToPxX(_startDip.X), ToPxY(_startDip.Y)), (ToPxX(pos.X), ToPxY(pos.Y))],
-                3,
-                PixelDraw.StrokeB,
-                PixelDraw.StrokeG,
-                PixelDraw.StrokeR,
-                255));
+            int x0 = ToPxX(_startDip.X);
+            int y0 = ToPxY(_startDip.Y);
+            int x1 = ToPxX(pos.X);
+            int y1 = ToPxY(pos.Y);
+            int thick = Math.Max(1, _strokeThickness);
+            if (_curveStyle == CurveStyle.Arrow)
+            {
+                if (_arrowAtEnd)
+                {
+                    Push(new ArrowOp(x0, y0, x1, y1, thick, _strokeB, _strokeG, _strokeR));
+                }
+                else
+                {
+                    Push(new ArrowOp(x1, y1, x0, y0, thick, _strokeB, _strokeG, _strokeR));
+                }
+            }
+            else if (_curveStyle == CurveStyle.Dashed)
+            {
+                Push(new StrokeOp(
+                    [(x0, y0), (x1, y1)],
+                    thick,
+                    _strokeB,
+                    _strokeG,
+                    _strokeR,
+                    255,
+                    dashed: true));
+            }
+            else
+            {
+                Push(new StrokeOp(
+                    [(x0, y0), (x1, y1)],
+                    thick,
+                    _strokeB,
+                    _strokeG,
+                    _strokeR,
+                    255));
+            }
+
             return;
         }
 
@@ -1103,21 +1628,16 @@ public partial class AnnotationWindow : Window
             return;
         }
 
-        if (_tool == AnnotateTool.Mosaic)
-        {
-            Push(new MosaicOp(rect));
-            return;
-        }
-
+        int shapeThick = Math.Max(1, _strokeThickness);
         if (_tool == AnnotateTool.Shape && _ellipse)
         {
-            Push(new EllipseOp(rect));
+            Push(new EllipseOp(rect, shapeThick, _strokeB, _strokeG, _strokeR));
             return;
         }
 
         if (_tool == AnnotateTool.Shape)
         {
-            Push(new RectOp(rect));
+            Push(new RectOp(rect, shapeThick, _strokeB, _strokeG, _strokeR));
         }
     }
 
@@ -1131,9 +1651,14 @@ public partial class AnnotationWindow : Window
         PixelBuffer nextCrop = RegionCropper.Crop(_frames, _selection);
         _original.ReleasePixels();
         _original = nextCrop;
+        _cachedBake?.ReleasePixels();
+        _cachedBake = null;
+        ReleaseMosaicDraft();
         _ops.Clear();
         _redo.Clear();
         _bakeDirty = true;
+        // Selection size may change — drop WriteableBitmap so PresentBuffer reallocates.
+        _previewBmp = null;
         RefreshHistory();
         LayoutChrome();
         RegionChanged?.Invoke(_selection);
@@ -1150,6 +1675,9 @@ public partial class AnnotationWindow : Window
         PixelBuffer nextCrop = RegionCropper.Crop(_frames, _selection);
         _original.ReleasePixels();
         _original = nextCrop;
+        _cachedBake?.ReleasePixels();
+        _cachedBake = null;
+        ReleaseMosaicDraft();
         _ops.Clear();
         _redo.Clear();
         _bakeDirty = true;
@@ -1263,7 +1791,7 @@ public partial class AnnotationWindow : Window
         _textEntry.Visibility = Visibility.Collapsed;
         if (text.Length > 0 && _textEntry.Tag is Point dip)
         {
-            Push(new TextOp(ToPxX(dip.X), ToPxY(dip.Y), text));
+            Push(new TextOp(ToPxX(dip.X), ToPxY(dip.Y), text, _strokeB, _strokeG, _strokeR, _textSize));
         }
     }
 
@@ -1323,7 +1851,41 @@ public partial class AnnotationWindow : Window
         button.Opacity = enabled ? 1 : 0.4;
     }
 
-    private void RefreshPreview() => _preview.Source = Bake().ToBitmapSource();
+    private void RefreshPreview() => PresentBuffer(Bake());
+
+    /// <summary>
+    /// Push BGRA into a single reusable WriteableBitmap. Avoids BitmapSource.Create
+    /// (full pixel copy + freeze) on every mosaic stamp / undo / tool commit.
+    /// </summary>
+    private void PresentBuffer(PixelBuffer buffer)
+    {
+        if (buffer.Width <= 0 || buffer.Height <= 0 || buffer.Bgra.Length == 0)
+        {
+            _preview.Source = null;
+            _previewBmp = null;
+            return;
+        }
+
+        if (_previewBmp is null
+            || _previewBmp.PixelWidth != buffer.Width
+            || _previewBmp.PixelHeight != buffer.Height)
+        {
+            _previewBmp = new WriteableBitmap(
+                buffer.Width,
+                buffer.Height,
+                96,
+                96,
+                PixelFormats.Bgra32,
+                null);
+            _preview.Source = _previewBmp;
+        }
+
+        _previewBmp.WritePixels(
+            new Int32Rect(0, 0, buffer.Width, buffer.Height),
+            buffer.Bgra,
+            buffer.Stride,
+            0);
+    }
 
     private void Finish(bool pin)
     {
@@ -1376,19 +1938,20 @@ public partial class AnnotationWindow : Window
                 OcrResult result = await _ocr.RecognizeAsync(image).ConfigureAwait(true);
                 if (result.Succeeded)
                 {
-                    try
+                    if (TryCopyTextToClipboard(result.Text ?? ""))
                     {
-                        System.Windows.Clipboard.SetText(result.Text ?? "");
                         NotifyStatus(WindowsOcrService.Copied);
                     }
-                    catch
+                    else
                     {
-                        NotifyStatus(WindowsOcrService.Failed);
+                        NotifyStatus(WindowsOcrService.ClipboardFailed, hardFailure: false);
                     }
                 }
                 else if (!string.IsNullOrEmpty(result.Error))
                 {
-                    NotifyStatus(result.Error!);
+                    bool hard = result.Error == WindowsOcrService.NoLanguage
+                        || result.Error == NullOcrService.NotEnabled;
+                    NotifyStatus(result.Error!, hardFailure: hard);
                 }
             }
             finally
@@ -1415,6 +1978,33 @@ public partial class AnnotationWindow : Window
         }
     }
 
+    private bool TryCopyTextToClipboard(string text)
+    {
+        try
+        {
+            void Set()
+            {
+                var data = new System.Windows.DataObject();
+                data.SetData(System.Windows.DataFormats.UnicodeText, text);
+                System.Windows.Clipboard.SetDataObject(data, true);
+            }
+
+            if (Dispatcher.CheckAccess())
+            {
+                Set();
+            }
+            else
+            {
+                Dispatcher.Invoke(Set);
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private void PickColorAt(Point dip)
     {
@@ -1438,12 +2028,14 @@ public partial class AnnotationWindow : Window
         }
     }
 
-    private void NotifyStatus(string message)
+    private void NotifyStatus(string message, bool hardFailure = false)
     {
         if (string.IsNullOrEmpty(message))
         {
             return;
         }
+
+        ShowToolbarStatus(message);
 
         if (_reportStatus is not null)
         {
@@ -1453,6 +2045,112 @@ public partial class AnnotationWindow : Window
         {
             StatusMessage?.Invoke(message);
         }
+
+        // Hard failures only: language pack / stub — prefer toast; MessageBox as last resort when no tray path.
+        if (hardFailure && _reportStatus is null)
+        {
+            try
+            {
+                System.Windows.MessageBox.Show(this, message, "Suite", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private void ShowToolbarStatus(string message)
+    {
+        _statusText.Text = message;
+        _statusChip.Visibility = Visibility.Visible;
+        PlaceStatusChip();
+        _statusHideCts?.Cancel();
+        _statusHideCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _statusHideCts = cts;
+        _ = HideStatusAfterAsync(cts.Token);
+    }
+
+    private async Task HideStatusAfterAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(2200, token).ConfigureAwait(true);
+            if (!token.IsCancellationRequested)
+            {
+                _statusChip.Visibility = Visibility.Collapsed;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void PlaceStatusChip()
+    {
+        if (_statusChip.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _statusChip.Measure(new Size(320, 80));
+        double w = Math.Max(48, _statusChip.DesiredSize.Width);
+        double h = Math.Max(22, _statusChip.DesiredSize.Height);
+        double barLeft = Canvas.GetLeft(_toolbar);
+        double barTop = Canvas.GetTop(_toolbar);
+        if (double.IsNaN(barLeft) || double.IsNaN(barTop))
+        {
+            barLeft = 8;
+            barTop = 8;
+        }
+
+        // Sit just above the toolbar stack when there is room; otherwise below.
+        double stackH = AnnotateToolbar.Height;
+        if (_subBar.Visibility == Visibility.Visible)
+        {
+            stackH += AnnotateToolbar.SubBarGap + AnnotateToolbar.SubBarHeight;
+            double subTop = Canvas.GetTop(_subBar);
+            if (!double.IsNaN(subTop))
+            {
+                barTop = Math.Min(barTop, subTop);
+            }
+        }
+
+        double top = barTop - h - 6;
+        if (top < 4)
+        {
+            top = barTop + stackH + 6;
+        }
+
+        Canvas.SetLeft(_statusChip, barLeft);
+        Canvas.SetTop(_statusChip, top);
+        _statusChip.Width = w;
+    }
+
+    private void UpdateArrowHeadDraft(Point start, Point end)
+    {
+        if (_arrowHeadDraft is null)
+        {
+            return;
+        }
+
+        Point tip = _arrowAtEnd ? end : start;
+        Point tail = _arrowAtEnd ? start : end;
+        double angle = Math.Atan2(tip.Y - tail.Y, tip.X - tail.X);
+        const double head = 14;
+        var hx1 = new Point(tip.X - (head * Math.Cos(angle - 0.45)), tip.Y - (head * Math.Sin(angle - 0.45)));
+        var hx2 = new Point(tip.X - (head * Math.Cos(angle + 0.45)), tip.Y - (head * Math.Sin(angle + 0.45)));
+        _arrowHeadDraft.Points.Clear();
+        _arrowHeadDraft.Points.Add(hx1);
+        _arrowHeadDraft.Points.Add(tip);
+        _arrowHeadDraft.Points.Add(hx2);
+    }
+
+    private void ReleaseMosaicDraft()
+    {
+        _mosaicDraft?.ReleasePixels();
+        _mosaicDraft = null;
+        _mosaicDraftLast = -1;
     }
 
     private (int X, int Y) ToVirtual(Point windowPos) =>
@@ -1546,26 +2244,63 @@ public partial class AnnotationWindow : Window
         void Apply(PixelBuffer buffer, PixelBuffer original);
     }
 
-    private sealed class RectOp(PixelRect rect) : IAnnotationOp
-    {
-        public void Apply(PixelBuffer buffer, PixelBuffer original) => PixelDraw.Rectangle(buffer, rect);
-    }
-
-    private sealed class EllipseOp(PixelRect rect) : IAnnotationOp
-    {
-        public void Apply(PixelBuffer buffer, PixelBuffer original) => PixelDraw.Ellipse(buffer, rect);
-    }
-
-    private sealed class MosaicOp(PixelRect rect) : IAnnotationOp
-    {
-        public void Apply(PixelBuffer buffer, PixelBuffer original) => PixelDraw.Mosaic(buffer, rect);
-    }
-
-    private sealed class StrokeOp(IReadOnlyList<(int X, int Y)> points, int thickness, byte b, byte g, byte r, byte a)
-        : IAnnotationOp
+    private sealed class RectOp(PixelRect rect, int thickness, byte b, byte g, byte r) : IAnnotationOp
     {
         public void Apply(PixelBuffer buffer, PixelBuffer original) =>
+            PixelDraw.RectangleColor(buffer, rect, thickness, b, g, r, 255);
+    }
+
+    private sealed class EllipseOp(PixelRect rect, int thickness, byte b, byte g, byte r) : IAnnotationOp
+    {
+        public void Apply(PixelBuffer buffer, PixelBuffer original) =>
+            PixelDraw.EllipseColor(buffer, rect, thickness, b, g, r, 255);
+    }
+
+    private sealed class MosaicStrokeOp(IReadOnlyList<(int X, int Y)> points, int brushRadius) : IAnnotationOp
+    {
+        public void Apply(PixelBuffer buffer, PixelBuffer original) =>
+            PixelDraw.MosaicBrush(buffer, points, brushRadius);
+    }
+
+    private sealed class StrokeOp(
+        IReadOnlyList<(int X, int Y)> points,
+        int thickness,
+        byte b,
+        byte g,
+        byte r,
+        byte a,
+        bool dashed = false) : IAnnotationOp
+    {
+        public void Apply(PixelBuffer buffer, PixelBuffer original)
+        {
+            if (dashed && points.Count >= 2)
+            {
+                for (int i = 1; i < points.Count; i++)
+                {
+                    PixelDraw.DashedLineColor(
+                        buffer,
+                        points[i - 1].X,
+                        points[i - 1].Y,
+                        points[i].X,
+                        points[i].Y,
+                        thickness,
+                        b,
+                        g,
+                        r,
+                        a);
+                }
+
+                return;
+            }
+
             PixelDraw.Polyline(buffer, points, thickness, b, g, r, a);
+        }
+    }
+
+    private sealed class ArrowOp(int x1, int y1, int x2, int y2, int thickness, byte b, byte g, byte r) : IAnnotationOp
+    {
+        public void Apply(PixelBuffer buffer, PixelBuffer original) =>
+            PixelDraw.ArrowColor(buffer, x1, y1, x2, y2, thickness, b, g, r, 255);
     }
 
     private sealed class EraseOp(IReadOnlyList<(int X, int Y)> points, int thickness) : IAnnotationOp
@@ -1574,7 +2309,7 @@ public partial class AnnotationWindow : Window
             PixelDraw.RestoreStroke(buffer, original, points, thickness);
     }
 
-    private sealed class TextOp(int x, int y, string text) : IAnnotationOp
+    private sealed class TextOp(int x, int y, string text, byte b, byte g, byte r, double fontSize) : IAnnotationOp
     {
         public void Apply(PixelBuffer buffer, PixelBuffer original)
         {
@@ -1584,8 +2319,8 @@ public partial class AnnotationWindow : Window
                 CultureInfo.CurrentUICulture,
                 FlowDirection.LeftToRight,
                 new Typeface("Segoe UI"),
-                18,
-                new SolidColorBrush(Color.FromRgb(PixelDraw.StrokeR, PixelDraw.StrokeG, PixelDraw.StrokeB)),
+                fontSize,
+                new SolidColorBrush(Color.FromRgb(r, g, b)),
                 1.0);
             using (DrawingContext dc = visual.RenderOpen())
             {
@@ -1597,7 +2332,14 @@ public partial class AnnotationWindow : Window
             rtb.Render(visual);
             rtb.Freeze();
             PixelBuffer baked = PixelBuffer.FromBitmapSource(rtb);
-            Buffer.BlockCopy(baked.Bgra, 0, buffer.Bgra, 0, Math.Min(baked.Bgra.Length, buffer.Bgra.Length));
+            try
+            {
+                Buffer.BlockCopy(baked.Bgra, 0, buffer.Bgra, 0, Math.Min(baked.Bgra.Length, buffer.Bgra.Length));
+            }
+            finally
+            {
+                baked.ReleasePixels();
+            }
         }
     }
 }

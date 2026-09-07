@@ -1,7 +1,16 @@
 namespace Suite.Capture;
 
+/// <summary>Curve / line style for AnnotateTool.Curve (secondary bar + right-click fallback).</summary>
+public enum CurveStyle
+{
+    Solid,
+    Dashed,
+    Arrow,
+}
+
 /// <summary>
 /// Snipaste-style annotate toolbar contract from design/SNIPASTE-TOOLBAR-SPEC.md.
+/// Secondary (腾讯/WeChat) property strip sits under the main bar for drawing tools.
 /// </summary>
 public enum AnnotateTool
 {
@@ -25,6 +34,8 @@ public enum AnnotateTool
 public static class AnnotateToolbar
 {
     public const double Height = 40;
+    public const double SubBarHeight = 36;
+    public const double SubBarGap = 4;
     public const double Cell = 36;
     public const double Gap = 8;
     public const double SeparatorWidth = 8;
@@ -32,6 +43,23 @@ public static class AnnotateToolbar
     public const double SelectedDot = 5;
     public const int StrokePx = 3;
     public const int AnchorDiameter = 8;
+
+    /// <summary>RGB swatches matching Tencent-style annotate palette (cyan…red).</summary>
+    public static readonly (byte R, byte G, byte B)[] Palette =
+    [
+        (0x00, 0xD4, 0xFF),
+        (0x00, 0xE6, 0x76),
+        (0xFF, 0xEB, 0x3B),
+        (0x9E, 0x9E, 0x9E),
+        (0xFF, 0xFF, 0xFF),
+        (0xDC, 0x28, 0x28),
+    ];
+
+    public static readonly int[] ThicknessChips = [2, 4, 6];
+    public static readonly int[] MarkerThicknessChips = [10, 14, 20];
+    public static readonly int[] MosaicRadiusChips = [10, 16, 24];
+    public static readonly int[] EraserThicknessChips = [12, 18, 28];
+    public static readonly int[] TextSizeChips = [14, 18, 24];
 
     public static readonly AnnotateTool[] Order =
     [
@@ -54,6 +82,14 @@ public static class AnnotateToolbar
 
     public readonly record struct Placement(double Left, double Top, bool Above);
 
+    /// <summary>Main + optional secondary property bar stack placement.</summary>
+    public readonly record struct StackPlacement(
+        double Left,
+        double MainTop,
+        double SubTop,
+        bool Above,
+        bool SubVisible);
+
     public static string Tooltip(AnnotateTool tool) => tool switch
     {
         AnnotateTool.Shape => "矩形",
@@ -75,6 +111,16 @@ public static class AnnotateToolbar
     };
 
     public static bool ShowsSelectedDot(AnnotateTool tool) => tool is
+        AnnotateTool.Shape or
+        AnnotateTool.Curve or
+        AnnotateTool.Pencil or
+        AnnotateTool.Marker or
+        AnnotateTool.Mosaic or
+        AnnotateTool.Text or
+        AnnotateTool.Eraser;
+
+    /// <summary>Drawing tools that show the Tencent-style secondary property strip.</summary>
+    public static bool ShowsPropertyBar(AnnotateTool tool) => tool is
         AnnotateTool.Shape or
         AnnotateTool.Curve or
         AnnotateTool.Pencil or
@@ -142,5 +188,55 @@ public static class AnnotateToolbar
         }
 
         return new Placement(left, top, above);
+    }
+
+    /// <summary>
+    /// Place main toolbar + optional secondary strip as one stack.
+    /// Below selection: [main] then [sub]. Above selection: [sub] above [main] (main closest to sel).
+    /// </summary>
+    public static StackPlacement PlaceStack(
+        double selLeft,
+        double selTop,
+        double selWidth,
+        double selHeight,
+        double barWidth,
+        double mainHeight,
+        double subHeight,
+        bool showSub,
+        double workLeft,
+        double workTop,
+        double workRight,
+        double workBottom,
+        double gap = Gap)
+    {
+        double stackH = showSub ? mainHeight + SubBarGap + subHeight : mainHeight;
+        Placement place = Place(
+            selLeft, selTop, selWidth, selHeight,
+            barWidth, stackH,
+            workLeft, workTop, workRight, workBottom,
+            gap);
+
+        if (!showSub)
+        {
+            return new StackPlacement(place.Left, place.Top, place.Top, place.Above, false);
+        }
+
+        if (!place.Above)
+        {
+            return new StackPlacement(
+                place.Left,
+                place.Top,
+                place.Top + mainHeight + SubBarGap,
+                Above: false,
+                SubVisible: true);
+        }
+
+        // Stack above selection: sub on top, main under it (closer to selection).
+        return new StackPlacement(
+            place.Left,
+            place.Top + subHeight + SubBarGap,
+            place.Top,
+            Above: true,
+            SubVisible: true);
     }
 }

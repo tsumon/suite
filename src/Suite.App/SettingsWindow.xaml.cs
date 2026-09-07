@@ -797,16 +797,6 @@ public partial class SettingsWindow : Window
         return true;
     }
 
-    private void OnApply(object sender, RoutedEventArgs e)
-    {
-        if (_loading)
-        {
-            return;
-        }
-
-        _applyTimer.Stop();
-        FlushApply();
-    }
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 

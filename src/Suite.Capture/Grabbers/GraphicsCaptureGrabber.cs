@@ -78,6 +78,20 @@ internal static class GraphicsCaptureGrabber
             {
             }
 
+            // Win11 yellow border: set IsBorderRequired=false via reflection when present.
+            // If property missing or GraphicsCapture fails, ScreenCapturePipeline falls back to DXGI then GDI (no yellow border).
+            try
+            {
+                System.Reflection.PropertyInfo? border = session.GetType().GetProperty("IsBorderRequired");
+                if (border is not null && border.CanWrite)
+                {
+                    border.SetValue(session, false);
+                }
+            }
+            catch (Exception)
+            {
+            }
+
             using var arrived = new ManualResetEventSlim(false);
             Direct3D11CaptureFrame? captured = null;
             Direct3D11CaptureFramePool framePool = pool;

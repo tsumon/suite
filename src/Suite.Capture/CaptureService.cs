@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -89,6 +90,8 @@ public sealed class CaptureService : IDisposable
         _select = null;
         ReleaseActiveFrames();
         _busy = false;
+        // Select cancel path (no annotation Closed handler) — nudge WorkingSet after dropping frames.
+        NudgeWorkingSet();
     }
 
     public void Dispose()
@@ -106,21 +109,33 @@ public sealed class CaptureService : IDisposable
     {
         var select = new RegionSelectSession { ShowMagnifier = request.ShowMagnifier };
         _select = select;
-        select.Cancelled += () => _ = _dispatcher.InvokeAsync(() =>
+        select.Cancelled += () =>
         {
-            if (!ReferenceEquals(_select, select))
+            void Handle()
             {
-                return;
+                if (!ReferenceEquals(_select, select))
+                {
+                    return;
+                }
+
+                select.CloseOverlays();
+                _select = null;
+                ReleaseActiveFrames();
+                _busy = false;
+                completed(new CaptureResult { Cancelled = true });
+                AppendLog("cancel");
+                NudgeWorkingSet();
             }
 
-            select.CloseOverlays();
-            _select = null;
-            ReleaseActiveFrames();
-            _busy = false;
-            completed(new CaptureResult { Cancelled = true });
-            AppendLog("cancel");
-            GC.Collect(2, GCCollectionMode.Optimized);
-        });
+            if (_dispatcher.CheckAccess())
+            {
+                Handle();
+            }
+            else
+            {
+                _dispatcher.Invoke(Handle);
+            }
+        };
         select.Completed += (rect, annotate) =>
         {
             void Handle()
@@ -215,7 +230,7 @@ public sealed class CaptureService : IDisposable
                 _busy = false;
                 completed(new CaptureResult { Cancelled = true, Method = method, Selection = selection, DpiX = monitor.DpiX, DpiY = monitor.DpiY });
                 AppendLog("cancel-annotate " + method);
-                GC.Collect(2, GCCollectionMode.Optimized);
+                NudgeWorkingSet();
                 return;
             }
 
@@ -308,7 +323,17 @@ public sealed class CaptureService : IDisposable
         AppendLog((error is null ? "ok " : "partial ") + method + (saved is null ? "" : " " + saved));
         // Deterministic ReleasePixels already dropped BGRA; one gen-2 collect helps return WorkingSet after large monitor frames.
         // Prefer ReleasePixels; this is a documented nudge only after a capture session ends.
-        GC.Collect(2, GCCollectionMode.Optimized);
+        NudgeWorkingSet();
+    }
+
+    /// <summary>
+    /// Full-monitor BGRA + frozen BitmapSources land on the LOH. Optimized collect alone
+    /// often leaves Private/WorkingSet high across F1 Esc cycles; compact once after session end.
+    /// </summary>
+    private static void NudgeWorkingSet()
+    {
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
     }
 
     private void ReleaseActiveFrames()

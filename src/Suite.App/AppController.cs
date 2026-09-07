@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Runtime;
 using Microsoft.Win32;
 using Suite.Capture;
 using Suite.Capture.Ocr;
@@ -21,6 +22,7 @@ public sealed class AppController : IDisposable
     private readonly NetSpeedTrayWidget _trayWidget = new();
     private readonly CaptureService _capture;
     private readonly IOcrService _ocr;
+    private readonly string _ocrBackendLabel;
     private readonly IScrollCaptureService _scrollCapture = new ScrollCaptureService();
     private readonly PinboardService _pinboard = new();
     private CancellationTokenSource? _scrollCts;
@@ -35,6 +37,7 @@ public sealed class AppController : IDisposable
     private int _taskbarFxFailCount;
     private bool _disposed;
     private bool _applyingRunKey;
+    private DateTime _lastCaptureStartUtc = DateTime.MinValue;
 
     public AppController()
     {
@@ -46,6 +49,9 @@ public sealed class AppController : IDisposable
         _ocr = WindowsOcrService.TryCreate(out WindowsOcrService? winOcr) && winOcr is not null
             ? winOcr
             : new NullOcrService();
+        _ocrBackendLabel = _ocr is WindowsOcrService w
+            ? "WinOCR lang=" + (string.IsNullOrEmpty(w.LanguageTag) ? "?" : w.LanguageTag)
+            : "NullOcr";
         _capture = new CaptureService(
             System.Windows.Application.Current.Dispatcher,
             _ocr,
@@ -79,6 +85,7 @@ public sealed class AppController : IDisposable
         _lastStartLabel = degrade.LastStartLabel;
         SuiteLog.SetEnabled(settings.Advanced.LoggingEnabled);
         SuiteLog.Info("start label=" + _lastStartLabel);
+        SuiteLog.Info("ocr backend=" + _ocrBackendLabel);
 
         _tray.ToggleThemeClicked += (_, _) => ToggleTheme();
         _tray.ToggleNetSpeedClicked += (_, _) => ToggleNetSpeedVisible();
@@ -696,7 +703,8 @@ public sealed class AppController : IDisposable
                         }
 
                         result.Image?.ReleasePixels();
-                        GC.Collect(2, GCCollectionMode.Optimized);
+                        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
                         return;
                     }
 
@@ -724,7 +732,8 @@ public sealed class AppController : IDisposable
                     }
 
                     result.Image.ReleasePixels();
-                    GC.Collect(2, GCCollectionMode.Optimized);
+                    GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
                     if (error is not null)
                     {
                         ReportStatus(error);
@@ -758,6 +767,14 @@ public sealed class AppController : IDisposable
             return;
         }
 
+        // Swallow F1 auto-repeat / duplicate hotkey bursts (seen as multi-flash on open).
+        DateTime now = DateTime.UtcNow;
+        if ((now - _lastCaptureStartUtc).TotalMilliseconds < 450)
+        {
+            return;
+        }
+
+        _lastCaptureStartUtc = now;
         AppSettings settings = Settings;
         _capture.Begin(
             new CaptureRequest
@@ -818,6 +835,8 @@ public sealed class AppController : IDisposable
 
             _pinboard.Pin(result.Image, left, top, dpiX, dpiY);
         }
+        // Non-pin captures: history wrote PNG to disk; do not keep the BitmapSource rooted via locals past this frame.
+        // (Pin path intentionally retains the same instance inside PinWindow until closed.)
     }
 
 

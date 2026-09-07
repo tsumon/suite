@@ -404,11 +404,10 @@
             BorderBrush="{DynamicResource LineBrush}" BorderThickness="0,1,0,0" Padding="16,0">
       <DockPanel LastChildFill="True">
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-          <Button x:Name="ApplyButton" Style="{StaticResource PrimaryButton}" Width="100" Content="立即保存" Margin="0,0,8,0" Click="OnApply"/>
-          <Button x:Name="CloseButton" Style="{StaticResource PrimaryButton}" Width="88" Content="关闭" IsCancel="True" Click="OnClose"/>
+          <Button x:Name="CloseButton" Style="{StaticResource PrimaryButton}" Width="88" Content="关闭" IsCancel="True" IsDefault="True" Click="OnClose"/>
         </StackPanel>
         <TextBlock x:Name="StatusText" VerticalAlignment="Center"
-                   FontSize="12" Foreground="{DynamicResource StatusBrush}" Text=""/>
+                   FontSize="12" Foreground="{DynamicResource StatusBrush}" Text="改动会自动保存"/>
       </DockPanel>
     </Border>
   </Grid>
