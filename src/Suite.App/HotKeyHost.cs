@@ -13,43 +13,52 @@ public sealed class HotKeyHost : IDisposable
     private bool _pinRegistered;
     private bool _colorPickRegistered;
     private bool _clickThroughRegistered;
+    private bool _scrollCaptureRegistered;
     private HotkeyBinding? _captureBinding;
     private int _lastCaptureWin32;
     private int _lastPinWin32;
     private int _lastColorPickWin32;
     private int _lastClickThroughWin32;
+    private int _lastScrollCaptureWin32;
 
     public event EventHandler? Pressed;
     public event EventHandler? PinClipboardPressed;
     public event EventHandler? ColorPickPressed;
     public event EventHandler? PinClickThroughPressed;
+    public event EventHandler? ScrollCapturePressed;
 
     public bool IsCaptureRegistered => _captureRegistered;
     public bool IsPinRegistered => _pinRegistered;
     public bool IsColorPickRegistered => _colorPickRegistered;
     public bool IsClickThroughRegistered => _clickThroughRegistered;
+    public bool IsScrollCaptureRegistered => _scrollCaptureRegistered;
     public int LastCaptureWin32Error => _lastCaptureWin32;
     public int LastPinWin32Error => _lastPinWin32;
     public int LastColorPickWin32Error => _lastColorPickWin32;
     public int LastClickThroughWin32Error => _lastClickThroughWin32;
+    public int LastScrollCaptureWin32Error => _lastScrollCaptureWin32;
 
     public bool TryStart(
         HotkeyBinding capture,
         HotkeyBinding? colorPick,
         HotkeyBinding? pinClickThrough,
+        HotkeyBinding? scrollCapture,
         out string? error,
         out string? pinError,
         out string? colorPickError,
-        out string? clickThroughError)
+        out string? clickThroughError,
+        out string? scrollCaptureError)
     {
         error = null;
         pinError = null;
         colorPickError = null;
         clickThroughError = null;
+        scrollCaptureError = null;
         _lastCaptureWin32 = 0;
         _lastPinWin32 = 0;
         _lastColorPickWin32 = 0;
         _lastClickThroughWin32 = 0;
+        _lastScrollCaptureWin32 = 0;
         Stop();
         var parameters = new HwndSourceParameters("SuiteHotKey")
         {
@@ -118,11 +127,38 @@ public sealed class HotKeyHost : IDisposable
             }
         }
 
+        if (scrollCapture is not null && !scrollCapture.IsDisabled
+            && !SameBinding(scrollCapture, capture)
+            && (colorPick is null || colorPick.IsDisabled || !SameBinding(scrollCapture, colorPick))
+            && (pinClickThrough is null || pinClickThrough.IsDisabled || !SameBinding(scrollCapture, pinClickThrough)))
+        {
+            if (NativeHotKey.TryRegister(
+                    _source.Handle,
+                    NativeConstants.ScrollCaptureHotKeyId,
+                    scrollCapture,
+                    out scrollCaptureError,
+                    out _lastScrollCaptureWin32))
+            {
+                _scrollCaptureRegistered = true;
+                scrollCaptureError = null;
+            }
+        }
+
         return _captureRegistered;
     }
 
+    public bool TryStart(
+        HotkeyBinding capture,
+        HotkeyBinding? colorPick,
+        HotkeyBinding? pinClickThrough,
+        out string? error,
+        out string? pinError,
+        out string? colorPickError,
+        out string? clickThroughError) =>
+        TryStart(capture, colorPick, pinClickThrough, null, out error, out pinError, out colorPickError, out clickThroughError, out _);
+
     public bool TryStart(HotkeyBinding binding, out string? error, out string? pinError) =>
-        TryStart(binding, null, null, out error, out pinError, out _, out _);
+        TryStart(binding, null, null, null, out error, out pinError, out _, out _, out _);
 
     public bool TryStart(HotkeyBinding binding, out string? error) =>
         TryStart(binding, out error, out _);
@@ -151,6 +187,12 @@ public sealed class HotKeyHost : IDisposable
         {
             NativeHotKey.TryUnregister(_source.Handle, NativeConstants.PinClickThroughHotKeyId, out _);
             _clickThroughRegistered = false;
+        }
+
+        if (_source is not null && _scrollCaptureRegistered)
+        {
+            NativeHotKey.TryUnregister(_source.Handle, NativeConstants.ScrollCaptureHotKeyId, out _);
+            _scrollCaptureRegistered = false;
         }
 
         _captureBinding = null;
@@ -292,6 +334,11 @@ public sealed class HotKeyHost : IDisposable
         else if (id == NativeConstants.PinClickThroughHotKeyId)
         {
             PinClickThroughPressed?.Invoke(this, EventArgs.Empty);
+            handled = true;
+        }
+        else if (id == NativeConstants.ScrollCaptureHotKeyId)
+        {
+            ScrollCapturePressed?.Invoke(this, EventArgs.Empty);
             handled = true;
         }
 

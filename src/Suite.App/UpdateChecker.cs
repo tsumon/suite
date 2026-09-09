@@ -28,13 +28,34 @@ public static class UpdateChecker
         public bool HasUpdate { get; init; }
     }
 
+    /// <summary>Short x.y.z for UI and compare (InformationalVersion / FileVersion preferred).</summary>
     public static string LocalVersion
     {
         get
         {
             try
             {
-                return Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+                Assembly asm = Assembly.GetExecutingAssembly();
+                string? info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+                if (!string.IsNullOrWhiteSpace(info))
+                {
+                    // Strip any +git metadata from InformationalVersion.
+                    int plus = info.IndexOf('+');
+                    if (plus >= 0)
+                    {
+                        info = info[..plus];
+                    }
+
+                    return NormalizeVersion(info);
+                }
+
+                string? file = asm.GetCustomAttribute<AssemblyFileVersionAttribute>()?.Version;
+                if (!string.IsNullOrWhiteSpace(file))
+                {
+                    return NormalizeVersion(file);
+                }
+
+                return NormalizeVersion(asm.GetName().Version?.ToString());
             }
             catch
             {
@@ -42,6 +63,8 @@ public static class UpdateChecker
             }
         }
     }
+
+    public static string LocalVersionDisplay => LocalVersion;
 
     public static async Task<CheckResult> CheckAsync(UpdateSettings settings, CancellationToken ct = default)
     {
@@ -53,10 +76,6 @@ public static class UpdateChecker
             return new CheckResult { Ok = false, Message = FailNotWired };
         }
 
-        // Placeholder org/repo: treat as not wired so we never claim success without releases.
-        bool placeholder = string.Equals(owner, "tsumon", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(repo, "suite", StringComparison.OrdinalIgnoreCase);
-
         try
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
@@ -66,11 +85,6 @@ public static class UpdateChecker
             using HttpResponseMessage response = await client.GetAsync(url, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                if (placeholder && (int)response.StatusCode is 404 or 403)
-                {
-                    return new CheckResult { Ok = false, Message = FailNotWired };
-                }
-
                 return new CheckResult { Ok = false, Message = FailNetwork };
             }
 
@@ -129,7 +143,7 @@ public static class UpdateChecker
                 return new CheckResult
                 {
                     Ok = true,
-                    Message = UpToDate,
+                    Message = UpToDate + "（当前 " + local + "，远端 " + tag + "）",
                     Version = tag,
                     HtmlUrl = html,
                     ChannelZh = channelZh,
@@ -140,7 +154,7 @@ public static class UpdateChecker
             return new CheckResult
             {
                 Ok = true,
-                Message = Found + "（" + channelZh + " " + tag + "）",
+                Message = Found + "（当前 " + local + " → " + channelZh + " " + tag + "）",
                 Version = tag,
                 HtmlUrl = html,
                 ChannelZh = channelZh,
@@ -153,7 +167,7 @@ public static class UpdateChecker
         }
         catch (HttpRequestException)
         {
-            return new CheckResult { Ok = false, Message = placeholder ? FailNotWired : FailNetwork };
+            return new CheckResult { Ok = false, Message = FailNetwork };
         }
         catch
         {

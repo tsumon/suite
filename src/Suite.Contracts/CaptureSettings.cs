@@ -25,6 +25,9 @@ public sealed class CaptureSettings
     /// <summary>Toggle click-through on topmost pin. Default Ctrl+Shift+Q.</summary>
     public HotkeyBinding PinClickThroughHotkey { get; set; } = HotkeyBinding.DefaultPinClickThrough.Clone();
 
+    /// <summary>Scroll long-screenshot hotkey. Default F4. VirtualKey 0 = disabled.</summary>
+    public HotkeyBinding ScrollCaptureHotkey { get; set; } = HotkeyBinding.DefaultScrollCapture.Clone();
+
     public CaptureSettings Clone() => new()
     {
         SaveFileAfterCapture = SaveFileAfterCapture,
@@ -35,6 +38,7 @@ public sealed class CaptureSettings
         HistoryMax = HistoryMax,
         ColorPickHotkey = ColorPickHotkey.Clone(),
         PinClickThroughHotkey = PinClickThroughHotkey.Clone(),
+        ScrollCaptureHotkey = ScrollCaptureHotkey.Clone(),
     };
 
     public void Normalize()
@@ -51,6 +55,7 @@ public sealed class CaptureSettings
 
         ColorPickHotkey ??= HotkeyBinding.DefaultColorPick.Clone();
         PinClickThroughHotkey ??= HotkeyBinding.DefaultPinClickThrough.Clone();
+        ScrollCaptureHotkey ??= HotkeyBinding.DefaultScrollCapture.Clone();
         if (ColorPickHotkey.VirtualKey is < 0 or > 0xFE)
         {
             ColorPickHotkey = HotkeyBinding.DefaultColorPick.Clone();
@@ -59,6 +64,11 @@ public sealed class CaptureSettings
         if (PinClickThroughHotkey.VirtualKey is < 0 or > 0xFE)
         {
             PinClickThroughHotkey = HotkeyBinding.DefaultPinClickThrough.Clone();
+        }
+
+        if (ScrollCaptureHotkey.VirtualKey is < 0 or > 0xFE)
+        {
+            ScrollCaptureHotkey = HotkeyBinding.DefaultScrollCapture.Clone();
         }
     }
 }

@@ -91,6 +91,27 @@ public sealed class TrayIconService : IDisposable
     public void Sync(AppSettings settings)
     {
         _netSpeedItem.Text = settings.NetSpeed.Visible ? "隐藏网速" : "显示网速";
+        HotkeyBinding scroll = settings.Capture.ScrollCaptureHotkey;
+        _scrollCaptureItem.Text = scroll.IsDisabled
+            ? "滚动长截图"
+            : "滚动长截图 (" + scroll.ToDisplayString() + ")";
+        string tip = "Suite";
+        if (!settings.Hotkey.IsDisabled)
+        {
+            tip += " · 截图 " + settings.Hotkey.ToDisplayString();
+        }
+
+        if (!scroll.IsDisabled)
+        {
+            tip += " · 滚动 " + scroll.ToDisplayString();
+        }
+
+        if (tip.Length > 63)
+        {
+            tip = tip[..63];
+        }
+
+        _icon.Text = tip;
         _runItem.CheckedChanged -= OnRunCheckedChanged;
         _runItem.Checked = settings.StartWithWindows;
         _runItem.CheckedChanged += OnRunCheckedChanged;

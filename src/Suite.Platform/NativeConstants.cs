@@ -24,4 +24,5 @@ public static class NativeConstants
     public const int PinClipboardHotKeyId = 2;
     public const int ColorPickHotKeyId = 3;
     public const int PinClickThroughHotKeyId = 4;
+    public const int ScrollCaptureHotKeyId = 5;
 }

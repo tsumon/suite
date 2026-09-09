@@ -280,7 +280,8 @@ public sealed class AppController : IDisposable
 
         if (!HotkeyEquals(previous.Hotkey, settings.Hotkey)
             || !HotkeyEquals(previous.Capture.ColorPickHotkey, settings.Capture.ColorPickHotkey)
-            || !HotkeyEquals(previous.Capture.PinClickThroughHotkey, settings.Capture.PinClickThroughHotkey))
+            || !HotkeyEquals(previous.Capture.PinClickThroughHotkey, settings.Capture.PinClickThroughHotkey)
+            || !HotkeyEquals(previous.Capture.ScrollCaptureHotkey, settings.Capture.ScrollCaptureHotkey))
         {
             RegisterHotKey(settings.Hotkey);
         }
@@ -588,14 +589,18 @@ public sealed class AppController : IDisposable
         _hotKey.ColorPickPressed += OnColorPickHotKey;
         _hotKey.PinClickThroughPressed -= OnPinClickThroughHotKey;
         _hotKey.PinClickThroughPressed += OnPinClickThroughHotKey;
+        _hotKey.ScrollCapturePressed -= OnScrollCaptureHotKey;
+        _hotKey.ScrollCapturePressed += OnScrollCaptureHotKey;
         if (!_hotKey.TryStart(
                 binding,
                 settings.Capture.ColorPickHotkey,
                 settings.Capture.PinClickThroughHotkey,
+                settings.Capture.ScrollCaptureHotkey,
                 out _,
                 out string? pinError,
                 out string? colorPickError,
-                out string? clickThroughError))
+                out string? clickThroughError,
+                out string? scrollCaptureError))
         {
             IReadOnlyList<HotkeyBinding> alts = _hotKey.SuggestAlternates(binding, 3);
             string message = HotkeyCopy.CaptureFailed(
@@ -632,6 +637,13 @@ public sealed class AppController : IDisposable
         if (!string.IsNullOrEmpty(clickThroughError))
         {
             string msg = "穿透快捷键注册失败，请换一组键。";
+            _tray.Balloon("Suite", msg);
+            _settingsWindow?.SetStatus(msg);
+        }
+
+        if (!string.IsNullOrEmpty(scrollCaptureError))
+        {
+            string msg = "滚动长截图热键注册失败，请换一组键。";
             _tray.Balloon("Suite", msg);
             _settingsWindow?.SetStatus(msg);
         }
@@ -855,6 +867,8 @@ public sealed class AppController : IDisposable
 
 
     private void OnColorPickHotKey(object? sender, EventArgs e) => StartColorPick();
+
+    private void OnScrollCaptureHotKey(object? sender, EventArgs e) => StartScrollCapture();
 
     private void OnPinClickThroughHotKey(object? sender, EventArgs e)
     {

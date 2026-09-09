@@ -240,9 +240,11 @@
           <ComboBox x:Name="ColorPickKeyBox" Margin="0,4,0,0" SelectionChanged="OnSelectionChanged"/>
           <TextBlock Style="{StaticResource HelpText}" Margin="0,8,0,0" Text="贴图穿透热键（默认 Ctrl+Shift+Q）"/>
           <TextBlock x:Name="ClickThroughHotkeyLabel" Style="{StaticResource HelpText}" Text="Ctrl+Shift+Q"/>
+          <TextBlock Style="{StaticResource HelpText}" Margin="0,8,0,0" Text="滚动长截图热键（默认 F4）"/>
+          <ComboBox x:Name="ScrollCaptureKeyBox" Margin="0,4,0,0" SelectionChanged="OnSelectionChanged"/>
           <Button Content="开始滚动长截图" HorizontalAlignment="Left" Padding="10,4" Margin="0,8,0,0"
                   Click="OnStartScrollCapture"/>
-          <TextBlock Style="{StaticResource HelpText}" Text="从托盘也可开始。点选或拖区后自己滚动，停滚约 1.5 秒自动完成。"/>
+          <TextBlock Style="{StaticResource HelpText}" Text="从托盘也可开始。选「关闭」可取消热键。点选或拖区后自己滚动，停滚约 1.5 秒自动完成。"/>
         </StackPanel>
       </ScrollViewer>
 
@@ -374,16 +376,23 @@
         <StackPanel>
           <TextBlock Style="{StaticResource PageTitle}" Text="高级"/>
           <Border Style="{StaticResource PageTitleHairline}"/>
-          <TextBlock Text="Suite" Margin="0,0,0,0" Foreground="{DynamicResource InkBrush}" FontWeight="SemiBold"/>
-          <TextBlock Style="{StaticResource HelpText}"
-                     Text="托盘小工具。截完即钉、网速进任务栏。"/>
-          <DockPanel Margin="0,12,0,0">
+          <TextBlock Style="{StaticResource SectionTitle}" Text="关于"/>
+          <TextBlock Text="Suite" Margin="0,8,0,0" Foreground="{DynamicResource InkBrush}" FontWeight="SemiBold" FontSize="15"/>
+          <TextBlock x:Name="AboutVersionText" Margin="0,6,0,0"
+                     Foreground="{DynamicResource InkBrush}" FontSize="14" FontWeight="SemiBold"
+                     Text="当前版本 …"/>
+          <TextBlock Style="{StaticResource HelpText}" Margin="0,4,0,0"
+                     Text="托盘小工具。截完即钉、网速进任务栏。更新来自 GitHub Releases（tsumon/suite）。"/>
+          <DockPanel Margin="0,14,0,0">
             <TextBlock DockPanel.Dock="Left" Style="{StaticResource FieldLabel}" Text="更新通道"/>
             <ComboBox x:Name="UpdateChannelBox" SelectionChanged="OnSelectionChanged"/>
           </DockPanel>
-          <Button Content="检查更新" HorizontalAlignment="Left" Padding="10,4" Margin="0,8,0,0"
+          <Button Content="检查更新" HorizontalAlignment="Left" Padding="12,6" Margin="0,10,0,0"
                   Click="OnCheckUpdates"/>
-          <CheckBox x:Name="LoggingBox" Content="写入调试日志" Margin="0,12,0,0"
+          <TextBlock x:Name="UpdateCheckHint" Style="{StaticResource HelpText}" Margin="0,6,0,0"
+                     Text="点「检查更新」对照远端发行版。结果会出现在下方状态栏。"/>
+          <Border Style="{StaticResource BlockHairline}"/>
+          <CheckBox x:Name="LoggingBox" Content="写入调试日志" Margin="0,0,0,0"
                     Foreground="{DynamicResource InkSecondaryBrush}"
                     Checked="OnLoggingChanged" Unchecked="OnLoggingChanged"/>
           <TextBlock x:Name="LoggingHelp" Style="{StaticResource HelpText}"

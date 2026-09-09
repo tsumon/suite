@@ -249,6 +249,7 @@ public sealed class SettingsJsonTests
         original.NetSpeed.EmbedSecondary = true;
         original.Capture.ColorPickHotkey = new HotkeyBinding { VirtualKey = 0x71 };
         original.Capture.PinClickThroughHotkey = HotkeyBinding.DefaultPinClickThrough.Clone();
+        original.Capture.ScrollCaptureHotkey = new HotkeyBinding { VirtualKey = 0x73 };
         AppSettings restored = SettingsJson.Deserialize(SettingsJson.Serialize(original));
         Assert.Equal(UpdateSettings.ChannelPreview, restored.Update.Channel);
         Assert.True(restored.Advanced.LoggingEnabled);
@@ -260,6 +261,7 @@ public sealed class SettingsJsonTests
         Assert.True(restored.Capture.PinClickThroughHotkey.Control);
         Assert.True(restored.Capture.PinClickThroughHotkey.Shift);
         Assert.Equal(0x51, restored.Capture.PinClickThroughHotkey.VirtualKey);
+        Assert.Equal(0x73, restored.Capture.ScrollCaptureHotkey.VirtualKey);
         Assert.Equal(4, restored.SchemaVersion);
     }
 

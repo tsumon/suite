@@ -2,7 +2,7 @@
 ; GPL-3.0 — see LICENSE / NOTICE in the repo root.
 
 #define MyAppName "Suite"
-#define MyAppVersion "0.1.2"
+#define MyAppVersion "0.1.3"
 #define MyAppPublisher "Joe / contributors"
 #define MyAppExeName "Suite.exe"
 ; Override on Windows before compile (finish-installer.ps1 patches this):

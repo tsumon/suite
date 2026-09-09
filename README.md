@@ -34,7 +34,7 @@
 
 ## 安装
 
-1. 打开 [Releases](https://github.com/tsumon/suite/releases)，下载 **`Suite-Setup-0.1.2.exe`**（安装包草稿版本号 **0.1.2**）。
+1. 打开 [Releases](https://github.com/tsumon/suite/releases)，下载 **`Suite-Setup-0.1.3.exe`**（安装包草稿版本号 **0.1.3**）。
 2. 安装完成后从开始菜单或桌面快捷方式启动 **Suite**；托盘出现图标即表示常驻。
 3. **便携版**：也可解压便携目录，直接运行 `Suite.exe`（勿拆散旁路 DLL）。布局约定见 [`installer/PORTABLE.md`](installer/PORTABLE.md)。
 

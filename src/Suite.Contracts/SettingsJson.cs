@@ -75,9 +75,13 @@ public static class SettingsJson
 
             settings.Capture.ColorPickHotkey ??= HotkeyBinding.DefaultColorPick.Clone();
             settings.Capture.PinClickThroughHotkey ??= HotkeyBinding.DefaultPinClickThrough.Clone();
+            settings.Capture.ScrollCaptureHotkey ??= HotkeyBinding.DefaultScrollCapture.Clone();
             // EmbedSecondary stays false (P2 default off).
             settings.SchemaVersion = AppSettings.CurrentSchemaVersion;
         }
+
+        // Additive: older schema-4 files may omit scrollCaptureHotkey; null → default F4.
+        settings.Capture.ScrollCaptureHotkey ??= HotkeyBinding.DefaultScrollCapture.Clone();
 
         if (settings.SchemaVersion <= 0)
         {

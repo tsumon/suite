@@ -8,6 +8,7 @@ public sealed class HotkeyBinding
     public const int DefaultVirtualKey = 0x70; // VK_F1
     public const int PinClipboardVirtualKey = 0x72; // VK_F3
     public const int DefaultColorPickVirtualKey = 0x71; // VK_F2
+    public const int DefaultScrollCaptureVirtualKey = 0x73; // VK_F4
 
     public bool Control { get; set; }
     public bool Shift { get; set; }
@@ -19,6 +20,9 @@ public sealed class HotkeyBinding
 
     /// <summary>F2 — color pick (INTERACTION-P2 §6).</summary>
     public static HotkeyBinding DefaultColorPick { get; } = new() { VirtualKey = DefaultColorPickVirtualKey };
+
+    /// <summary>F4 — scroll long-screenshot (tray/settings also start it).</summary>
+    public static HotkeyBinding DefaultScrollCapture { get; } = new() { VirtualKey = DefaultScrollCaptureVirtualKey };
 
     /// <summary>Ctrl+Shift+Q — toggle top pin click-through (INTERACTION-P2 §4.2).</summary>
     public static HotkeyBinding DefaultPinClickThrough { get; } = new()

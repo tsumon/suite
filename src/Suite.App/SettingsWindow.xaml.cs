@@ -47,12 +47,24 @@ public partial class SettingsWindow : Window
         PopulateTaskbarModes();
         PopulateUpdateChannels();
         PopulateColorPickKeys();
+        PopulateScrollCaptureKeys();
+        ApplyAboutVersion();
         LoadFrom(_controller.Settings);
         RefreshAdapters();
         UpdateCascades();
         _loading = false;
         RefreshLightTransparencyTip();
         SelectNav("general");
+    }
+
+    private void ApplyAboutVersion()
+    {
+        string ver = UpdateChecker.LocalVersionDisplay;
+        Title = "Suite 设置 — " + ver;
+        if (AboutVersionText is not null)
+        {
+            AboutVersionText.Text = "当前版本 " + ver;
+        }
     }
 
 
@@ -321,6 +333,14 @@ public partial class SettingsWindow : Window
             ClickThroughHotkeyLabel.Text = settings.Capture.PinClickThroughHotkey.ToDisplayString();
         }
 
+        if (ScrollCaptureKeyBox is not null)
+        {
+            KeyOption? sc = ScrollCaptureKeyBox.Items.OfType<KeyOption>()
+                .FirstOrDefault(x => x.VirtualKey == settings.Capture.ScrollCaptureHotkey.VirtualKey);
+            ScrollCaptureKeyBox.SelectedItem = sc ?? ScrollCaptureKeyBox.Items.OfType<KeyOption>()
+                .FirstOrDefault(x => x.VirtualKey == HotkeyBinding.DefaultScrollCaptureVirtualKey);
+        }
+
         if (EmbedSecondaryBox is not null)
         {
             EmbedSecondaryBox.IsChecked = settings.NetSpeed.EmbedSecondary;
@@ -427,6 +447,11 @@ public partial class SettingsWindow : Window
         if (ColorPickKeyBox?.SelectedItem is KeyOption cpKey)
         {
             settings.Capture.ColorPickHotkey = new HotkeyBinding { VirtualKey = cpKey.VirtualKey };
+        }
+
+        if (ScrollCaptureKeyBox?.SelectedItem is KeyOption scKey)
+        {
+            settings.Capture.ScrollCaptureHotkey = new HotkeyBinding { VirtualKey = scKey.VirtualKey };
         }
 
         if (EmbedSecondaryBox is not null)
@@ -899,6 +924,21 @@ public partial class SettingsWindow : Window
         for (int i = 1; i <= 24; i++)
         {
             ColorPickKeyBox.Items.Add(new KeyOption(0x6F + i, "F" + i));
+        }
+    }
+
+    private void PopulateScrollCaptureKeys()
+    {
+        if (ScrollCaptureKeyBox is null)
+        {
+            return;
+        }
+
+        ScrollCaptureKeyBox.Items.Clear();
+        ScrollCaptureKeyBox.Items.Add(new KeyOption(0, "关闭（无热键）"));
+        for (int i = 1; i <= 24; i++)
+        {
+            ScrollCaptureKeyBox.Items.Add(new KeyOption(0x6F + i, "F" + i));
         }
     }
 
