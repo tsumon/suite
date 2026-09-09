@@ -3,13 +3,14 @@ using Suite.Capture.Native;
 namespace Suite.Capture.Ocr;
 
 /// <summary>
-/// Best-effort vertical scroll stitch for one HWND.
-/// Wheel / VSCROLL + client BitBlt; stop on no-change, idle timeout, or max height.
-/// Win11 Chromium / smooth-scroll / composition often fail — see OCR-SCROLL-SPEC.
+/// User-driven vertical scroll stitch for a screen rect.
+/// Suite never injects WM_MOUSEWHEEL / VSCROLL — Joe scrolls; we BitBlt + stitch on change,
+/// then idle-stop (IdleStopMs). See OCR-SCROLL-SPEC.
 /// </summary>
 public sealed class ScrollCaptureService : IScrollCaptureService
 {
     public const string BadHwnd = "没找到可滚动的窗口。";
+    public const string BadRegion = "没找到可滚动的窗口。";
     public const string CaptureFailed = "这个窗口暂时滚不动长图。";
     public const string Cancelled = "";
     public const string TooShort = "这个窗口暂时滚不动长图。";
@@ -18,24 +19,25 @@ public sealed class ScrollCaptureService : IScrollCaptureService
     public const string Busy = "正在拼接长图…";
     public const string Timeout = "滚动超时，没有截到内容。";
     public const string NotEnabled = "滚动长截图尚未在本机启用。";
+    public const string PickHint = "点选窗口或拖选区域；Esc 取消。";
+    public const string ScrollHint = "在选区内滚动；停滚约 1.5 秒后自动完成";
 
     public async Task<ScrollCaptureResult> CaptureAsync(
-        IntPtr hwnd,
+        PixelRect screenRect,
         ScrollCaptureOptions options,
         CancellationToken cancellationToken = default)
     {
-        if (hwnd == IntPtr.Zero || !CaptureNative.IsWindow(hwnd) || !CaptureNative.IsWindowVisible(hwnd))
+        if (screenRect.IsEmpty || screenRect.Width < 2 || screenRect.Height < 2)
         {
-            return Fail(BadHwnd);
+            return Fail(BadRegion);
         }
 
-        IntPtr target = CaptureNative.GetAncestor(hwnd, CaptureNative.GaRoot);
-        if (target == IntPtr.Zero)
-        {
-            target = hwnd;
-        }
+        int idleMs = Math.Max(200, options.IdleStopMs);
+        int sampleMs = Math.Clamp(options.SampleIntervalMs, 80, 1000);
+        int maxH = Math.Max(screenRect.Height, options.MaxHeightPx);
+        int maxDuration = Math.Max(idleMs * 20, options.MaxDurationMs);
 
-        PixelBuffer? previous = CaptureClient(target);
+        PixelBuffer? previous = CaptureScreen(screenRect);
         if (previous is null || previous.Width < 2 || previous.Height < 2)
         {
             previous?.ReleasePixels();
@@ -43,12 +45,13 @@ public sealed class ScrollCaptureService : IScrollCaptureService
         }
 
         int firstHeight = previous.Height;
-        int maxH = Math.Max(firstHeight, options.MaxHeightPx);
         PixelBuffer stitch = previous.Clone();
         int stitchedH = firstHeight;
         var started = DateTime.UtcNow;
-        int unchangedRounds = 0;
-        const int UnchangedStop = 2;
+        var lastChangeUtc = started;
+        bool grew = false;
+        int consecutiveRejects = 0;
+        const int maxConsecutiveRejects = 40;
         PixelBuffer? result = null;
 
         try
@@ -56,25 +59,33 @@ public sealed class ScrollCaptureService : IScrollCaptureService
             while (stitchedH < maxH)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if ((DateTime.UtcNow - started).TotalMilliseconds > Math.Max(options.IdleStopMs * 40, 12_000))
+                if ((DateTime.UtcNow - started).TotalMilliseconds > maxDuration)
                 {
                     break;
                 }
 
-                ScrollStep(target);
-                await Task.Delay(Math.Max(40, options.StepDelayMs), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(sampleMs, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
 
-                PixelBuffer? next = CaptureClient(target);
+                PixelBuffer? next = CaptureScreen(screenRect);
                 if (next is null)
                 {
                     break;
                 }
 
-                if (next.Width != previous.Width || BuffersVisuallyEqual(previous, next))
+                if (next.Width != previous.Width || next.Height != previous.Height
+                    || BuffersVisuallyEqual(previous, next))
                 {
                     next.ReleasePixels();
-                    unchangedRounds++;
-                    if (unchangedRounds >= UnchangedStop)
+                    double idleFor = (DateTime.UtcNow - lastChangeUtc).TotalMilliseconds;
+                    if (grew && idleFor >= idleMs)
+                    {
+                        break;
+                    }
+
+                    if (!grew
+                        && (DateTime.UtcNow - started).TotalMilliseconds
+                            >= Math.Max(idleMs * 4, options.MaxWaitFirstChangeMs))
                     {
                         break;
                     }
@@ -82,20 +93,25 @@ public sealed class ScrollCaptureService : IScrollCaptureService
                     continue;
                 }
 
-                unchangedRounds = 0;
                 int overlap = EstimateOverlap(previous, next);
                 int append = Math.Max(0, next.Height - overlap);
                 if (append <= 0)
                 {
-                    next.ReleasePixels();
-                    unchangedRounds++;
-                    if (unchangedRounds >= UnchangedStop)
+                    // Changed but no confident scroll delta — update previous for idle; do not grow.
+                    consecutiveRejects++;
+                    previous.ReleasePixels();
+                    previous = next;
+                    lastChangeUtc = DateTime.UtcNow;
+                    if (consecutiveRejects >= maxConsecutiveRejects && grew)
                     {
+                        // Cap transitional churn; idle path still finishes via equal frames.
                         break;
                     }
 
                     continue;
                 }
+
+                consecutiveRejects = 0;
 
                 int room = maxH - stitchedH;
                 if (append > room)
@@ -120,6 +136,8 @@ public sealed class ScrollCaptureService : IScrollCaptureService
                 stitch.ReleasePixels();
                 stitch = grown;
                 stitchedH = newH;
+                grew = stitchedH > firstHeight + 2;
+                lastChangeUtc = DateTime.UtcNow;
 
                 previous.ReleasePixels();
                 previous = next;
@@ -128,14 +146,19 @@ public sealed class ScrollCaptureService : IScrollCaptureService
                 {
                     break;
                 }
+
+                // After a growth, keep sampling until idle; do not stop on the growth frame itself.
             }
 
+            // Final idle wait: if we grew and then hit max duration mid-scroll, still OK if taller.
             if (stitchedH <= firstHeight + 2)
             {
-                return Fail(TooShort);
+                return Fail(
+                    (DateTime.UtcNow - started).TotalMilliseconds >= maxDuration
+                        ? Timeout
+                        : TooShort);
             }
 
-            // Hand ownership of stitch to caller; replace local with a tiny buffer for finally cleanup.
             result = stitch;
             stitch = PixelBuffer.Allocate(1, 1);
             return new ScrollCaptureResult { Succeeded = true, Image = result };
@@ -155,49 +178,21 @@ public sealed class ScrollCaptureService : IScrollCaptureService
         }
     }
 
-    public static IntPtr ResolveForegroundHwnd()
-    {
-        IntPtr hwnd = CaptureNative.GetForegroundWindow();
-        if (hwnd == IntPtr.Zero)
-        {
-            return IntPtr.Zero;
-        }
-
-        IntPtr root = CaptureNative.GetAncestor(hwnd, CaptureNative.GaRoot);
-        return root == IntPtr.Zero ? hwnd : root;
-    }
-
     private static ScrollCaptureResult Fail(string error) => new()
     {
         Succeeded = false,
         Error = error,
     };
 
-    private static void ScrollStep(IntPtr hwnd)
+    internal static PixelBuffer? CaptureScreen(PixelRect screenRect)
     {
-        int delta = -120 * 3;
-        IntPtr wParam = new IntPtr((delta << 16) & unchecked((int)0xFFFF0000));
-        CaptureNative.SendMessage(hwnd, CaptureNative.WmMouseWheel, wParam, IntPtr.Zero);
-        CaptureNative.SendMessage(hwnd, CaptureNative.WmVscroll, new IntPtr(CaptureNative.SbPagedown), IntPtr.Zero);
-    }
-
-    private static PixelBuffer? CaptureClient(IntPtr hwnd)
-    {
-        if (!CaptureNative.GetClientRect(hwnd, out Rect client)
-            || client.Right - client.Left < 2
-            || client.Bottom - client.Top < 2)
+        if (screenRect.IsEmpty || screenRect.Width < 1 || screenRect.Height < 1)
         {
             return null;
         }
 
-        int width = client.Right - client.Left;
-        int height = client.Bottom - client.Top;
-        var pt = new POINT(0, 0);
-        if (!CaptureNative.ClientToScreen(hwnd, ref pt))
-        {
-            return null;
-        }
-
+        int width = screenRect.Width;
+        int height = screenRect.Height;
         IntPtr hdcScreen = CaptureNative.GetDC(IntPtr.Zero);
         if (hdcScreen == IntPtr.Zero)
         {
@@ -218,10 +213,9 @@ public sealed class ScrollCaptureService : IScrollCaptureService
 
             old = CaptureNative.SelectObject(hdcMem, hbmp);
             if (!CaptureNative.BitBlt(
-                    hdcMem, 0, 0, width, height, hdcScreen, pt.X, pt.Y, CaptureNative.Srccopy))
+                    hdcMem, 0, 0, width, height, hdcScreen, screenRect.X, screenRect.Y, CaptureNative.Srccopy))
             {
-                CaptureNative.PrintWindow(
-                    hwnd, hdcMem, CaptureNative.PwClientOnly | CaptureNative.PwRenderFullContent);
+                return null;
             }
 
             var info = new BitmapInfo
@@ -303,40 +297,103 @@ public sealed class ScrollCaptureService : IScrollCaptureService
         return true;
     }
 
-    private static int EstimateOverlap(PixelBuffer previous, PixelBuffer next)
+    /// <summary>
+    /// Overlap rows between bottom of <paramref name="previous"/> and top of <paramref name="next"/>.
+    /// On no confident match returns <c>next.Height</c> so append = 0 — never guesses max/4.
+    /// </summary>
+    internal static int EstimateOverlap(PixelBuffer previous, PixelBuffer next)
     {
         int w = Math.Min(previous.Width, next.Width);
-        int max = Math.Min(previous.Height, next.Height);
-        for (int overlap = max; overlap >= Math.Max(8, max / 8); overlap -= Math.Max(1, max / 32))
+        int h = Math.Min(previous.Height, next.Height);
+        if (w < 2 || h < 12)
         {
-            if (RowsMatch(previous, previous.Height - overlap, next, 0, overlap, w))
+            return next.Height;
+        }
+
+        const int minAppend = 4;
+        // Mean abs BGR sample must beat this to accept a candidate.
+        const double passMeanAbs = 12.0;
+
+        int fingerprintH = Math.Clamp(h / 4, 24, Math.Min(80, h / 3));
+        if (fingerprintH > h - minAppend)
+        {
+            fingerprintH = Math.Max(8, h - minAppend);
+        }
+
+        int maxMatchY = h - fingerprintH; // y in next where strip may start
+        if (maxMatchY < 0)
+        {
+            return next.Height;
+        }
+
+        // Strip = last fingerprintH rows of previous. Content scrolled down by D matches at y = h - fingerprintH - D.
+        int stripY = previous.Height - fingerprintH;
+        int bestY = -1;
+        double bestScore = double.MaxValue;
+
+        // Step-1 Y search (strip SAD is already subsampled). Coarse steps can skip the true D.
+        for (int y = 0; y <= maxMatchY; y++)
+        {
+            double score = MeanAbsDiffStrip(previous, stripY, next, y, fingerprintH, w);
+            if (score < bestScore)
             {
-                return overlap;
+                bestScore = score;
+                bestY = y;
             }
         }
 
-        return Math.Min(max / 4, next.Height / 4);
+        if (bestY < 0)
+        {
+            return next.Height;
+        }
+
+        // D = how many new rows at bottom of next.
+        int delta = (h - fingerprintH) - bestY;
+        if (delta < minAppend || bestScore > passMeanAbs)
+        {
+            return next.Height; // reject → append 0
+        }
+
+        // Optional: verify a taller overlap band at this delta (reduces false positives).
+        int overlap = h - delta;
+        double verify = MeanAbsDiffStrip(previous, previous.Height - overlap, next, 0, overlap, w);
+        if (verify > passMeanAbs * 1.25)
+        {
+            return next.Height;
+        }
+
+        return overlap;
     }
 
-    private static bool RowsMatch(
+    /// <summary>Subsampled mean abs diff on B,G,R (skip alpha). Lower is better.</summary>
+    private static double MeanAbsDiffStrip(
         PixelBuffer a, int aY, PixelBuffer b, int bY, int rows, int width)
     {
-        int bytes = width * 4;
-        int yStep = Math.Max(1, rows / 16);
-        int xStep = Math.Max(4, bytes / 64);
+        if (rows <= 0 || width <= 0)
+        {
+            return double.MaxValue;
+        }
+
+        int yStep = Math.Max(1, rows / 24);
+        int xStep = Math.Max(1, width / 48);
+        long sum = 0;
+        int samples = 0;
+
         for (int y = 0; y < rows; y += yStep)
         {
             int ai = (aY + y) * a.Stride;
             int bi = (bY + y) * b.Stride;
-            for (int x = 0; x < bytes; x += xStep)
+            for (int x = 0; x < width; x += xStep)
             {
-                if (a.Bgra[ai + x] != b.Bgra[bi + x])
-                {
-                    return false;
-                }
+                int ao = ai + (x * 4);
+                int bo = bi + (x * 4);
+                sum += Math.Abs(a.Bgra[ao] - b.Bgra[bo]);
+                sum += Math.Abs(a.Bgra[ao + 1] - b.Bgra[bo + 1]);
+                sum += Math.Abs(a.Bgra[ao + 2] - b.Bgra[bo + 2]);
+                samples += 3;
             }
         }
 
-        return true;
+        return samples == 0 ? double.MaxValue : (double)sum / samples;
     }
 }

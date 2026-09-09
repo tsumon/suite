@@ -1,6 +1,6 @@
 # OCR + 滚动长截图 — Operate 合约（v1.1）
 
-日期：2026-09-06。权威视觉：根目录 `DESIGN.md`。工具栏像素：`SNIPASTE-TOOLBAR-SPEC.md`。  
+日期：2026-09-09（滚动改为用户自滚 + 空闲停）。权威视觉：根目录 `DESIGN.md`。工具栏像素：`SNIPASTE-TOOLBAR-SPEC.md`。  
 本文件定 **入口 / 状态 / 失败句**。不写 `src/`。模式：**Operate**（第 100 次截图一样快；无入场动画）。
 
 交互总览见 `INTERACTION-P1.md`。
@@ -9,7 +9,7 @@
 
 - [x] `WindowsOcrService`（WinRT `OcrEngine`，BGRA8 → SoftwareBitmap）；不可用时 `NullOcrService`
 - [x] 松手栏 `Ocr` 键：`Text`/`Eraser` 之间；tooltip「识字」；成功「已复制文字。」；栏不关
-- [x] `ScrollCaptureService` v1（单 HWND、轮滚/VSCROLL、竖向拼接、无变化/超时停）
+- [x] `ScrollCaptureService` + `ScrollCaptureSession`（点选/拖区 → **用户自滚** → 屏矩 BitBlt 拼接 → 空闲 `IdleStopMs` 默认 1.5s 停；**不**注入滚轮）
 - [x] 托盘「滚动长截图」+ 设置·截图次要按钮；**不**改 F1
 - [x] 截图帧 / Bake 缓存 / 会话结束 `ReleasePixels`；滚动中间帧释放
 
@@ -85,28 +85,29 @@ Shape, Curve, Pencil, Marker, Mosaic, Text, Ocr, Eraser | Undo, Redo | Close, Pi
 | 入口 | 角色 | 文案 |
 | --- | --- | --- |
 | 托盘右键 | **主入口** | `滚动长截图`（放在截图相关项附近；**不要**盖过「切换系统深浅色」第一项） |
-| 设置 · 截图组 | 次要说明 + 可选「开始滚动长截图」次要按钮（系统按钮，左对齐） | 帮助：`从托盘也可开始。只滚一个窗口。` |
+| 设置 · 截图组 | 次要说明 + 可选「开始滚动长截图」次要按钮（系统按钮，左对齐） | 帮助：`从托盘也可开始。点选或拖区后自己滚动，停滚约 1.5 秒自动完成。` |
 | F1 / 松手栏 | **禁止**默认塞入；禁止改成 F1 行为 | — |
 
-点击入口后：短暂十字/点选，点一个可滚动 HWND（或用前台窗，见选项）。
+点击入口后：拾取（点窗吸附或拖矩形）→ 用户自滚 → 空闲自动完成。
 
 ### 2.2 范围与产出
 
 | 项 | 合约 |
 | --- | --- |
-| 范围 | **一个**可滚动 HWND（点选或前台） |
+| 范围 | 点选窗口客户区（悬停吸附）**或**拖拽矩形视口；捕获的是 **屏幕矩形**（BitBlt），不依赖 HWND 滚消息 |
 | 产出 | 单张竖向拼图 → 剪贴板；若设置勾了「截完后保存 PNG」则同时存盘 |
-| 滚法 | 对目标发滚动 / 轮询客户区差分；超时或连续 N 帧无变化则停 |
-| 非目标 v1 | 整桌自动滚、浏览器插件、横向长图、视频、跨进程注入 |
+| 滚法 | **用户**在选区内自己滚；Suite **不**发 `WM_MOUSEWHEEL` / `VSCROLL`。周期采样差分竖向拼接；拼高大于首帧后，**无新内容达 `IdleStopMs`（默认 1.5s）** 自动完成 |
+| 非目标 v1 | 整桌自动滚、浏览器插件、横向长图、视频、跨进程注入、注入式滚轮 |
 
 ### 2.3 状态
 
 | 状态 | UI |
 | --- | --- |
-| 拾取窗 | 目标窗红描边提示（同截图悬停语法）；Esc / 右键 = 整次取消 |
-| 滚动中 | 托盘气泡或角标：`正在拼接长图…`；可 Esc 取消（已拼部分丢弃） |
+| 拾取 | 点窗吸附 / 拖区；红描边；提示：`点选窗口或拖选区域；Esc 取消。`；Esc / 右键 = 整次取消 |
+| 等待用户滚 | 选区红框（可点穿）；hint：`在选区内滚动；停滚约 1.5 秒后自动完成` |
+| 拼接中 | `正在拼接长图…`；Esc 取消（已拼丢弃，静默） |
 | 成功 | `已复制长图。`（若同时存盘：`已复制长图并保存。`） |
-| 无变化即停 | 仍成功产出当前拼接；句同成功 |
+| 空闲完成 | 用户停滚约 1.5s 且已拼出新内容 → 成功句 |
 | 失败 | 见 §2.4；不装成功 |
 
 ### 2.4 失败句
@@ -121,8 +122,16 @@ Shape, Curve, Pencil, Marker, Mosaic, Text, Ocr, Eraser | Undo, Redo | Close, Pi
 
 ### 2.5 接口（可后补实现）
 
-- `IScrollCaptureService.CaptureAsync(IntPtr hwnd, ScrollCaptureOptions options, CancellationToken ct)`
-- BACKLOG：真机 Win11 矩阵（Chromium、平滑滚动、DPI 混合）
+- `IScrollCaptureService.CaptureAsync(PixelRect screenRect, ScrollCaptureOptions options, CancellationToken ct)` — 只采样拼接，不滚
+- `ScrollCaptureSession` — 拾取 + 录制编排；`IdleStopMs` 默认 1500
+- BACKLOG：真机 Win11 矩阵（Chromium、平滑滚动、DPI 混合）再验一次
+
+
+### 2.6 拼接匹配（防重复）
+
+- 指纹：取上一帧底部条带，在下一帧用 subsampled BGR SAD 搜最佳 Y；`append = scrollDelta`，仅在 mean-abs < 阈值时接受。
+- **拒绝坏匹配**：无过线候选则 **append 0**（更新 previous / idle），**禁止** `max/4` 一类猜测 overlap。
+- 捕获矩形相对红描边 **inset ~4px**，避免描边进 BitBlt。
 
 ---
 

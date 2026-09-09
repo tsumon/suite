@@ -26,6 +26,7 @@ public sealed class AppController : IDisposable
     private readonly IScrollCaptureService _scrollCapture = new ScrollCaptureService();
     private readonly PinboardService _pinboard = new();
     private CancellationTokenSource? _scrollCts;
+    private ScrollCaptureSession? _scrollSession;
     private bool _scrollBusy;
     private readonly TaskbarFxClient _taskbarFx = new();
     private SettingsWindow? _settingsWindow;
@@ -367,6 +368,8 @@ public sealed class AppController : IDisposable
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         _scrollCts?.Cancel();
         _scrollCts?.Dispose();
+        _scrollSession?.Dispose();
+        _scrollSession = null;
         _colorPick?.Dispose();
         _colorPick = null;
         _hotKey.Dispose();
@@ -672,92 +675,103 @@ public sealed class AppController : IDisposable
             return;
         }
 
-        IntPtr hwnd = ScrollCaptureService.ResolveForegroundHwnd();
-        if (hwnd == IntPtr.Zero)
-        {
-            ReportStatus(ScrollCaptureService.BadHwnd);
-            return;
-        }
-
         _scrollBusy = true;
+        _scrollSession?.Dispose();
         _scrollCts?.Cancel();
+        _scrollCts?.Dispose();
         _scrollCts = new CancellationTokenSource();
-        CancellationToken token = _scrollCts.Token;
         AppSettings settingsSnapshot = Settings;
-        ReportStatus(ScrollCaptureService.Busy);
-        _ = Task.Run(async () =>
+        var session = new ScrollCaptureSession(
+            ReportStatus,
+            _scrollCapture,
+            new ScrollCaptureOptions(),
+            result => OnScrollCaptureFinished(result, settingsSnapshot),
+            System.Windows.Application.Current.Dispatcher);
+        _scrollSession = session;
+        // Bridge AppController cancel → session (Esc also handled inside session).
+        _scrollCts.Token.Register(() =>
         {
             try
             {
-                ScrollCaptureResult result = await _scrollCapture.CaptureAsync(
-                    hwnd,
-                    new ScrollCaptureOptions(),
-                    token).ConfigureAwait(false);
-                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    if (!result.Succeeded || result.Image is null)
-                    {
-                        if (!string.IsNullOrEmpty(result.Error))
-                        {
-                            ReportStatus(result.Error!);
-                        }
-
-                        result.Image?.ReleasePixels();
-                        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-                        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-                        return;
-                    }
-
-                    string? saved = null;
-                    string? error = null;
-                    try
-                    {
-                        ImageClipboard.Copy(result.Image);
-                    }
-                    catch
-                    {
-                        error = ScrollCaptureService.CaptureFailed;
-                    }
-
-                    if (error is null && settingsSnapshot.Capture.SaveFileAfterCapture)
-                    {
-                        try
-                        {
-                            saved = PngFileSaver.Save(result.Image, settingsSnapshot.Capture.SaveDirectory);
-                        }
-                        catch (Exception ex)
-                        {
-                            error = "无法保存文件：" + ex.Message;
-                        }
-                    }
-
-                    result.Image.ReleasePixels();
-                    GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-                    if (error is not null)
-                    {
-                        ReportStatus(error);
-                        return;
-                    }
-
-                    ReportStatus(saved is null
-                        ? ScrollCaptureService.Copied
-                        : ScrollCaptureService.CopiedAndSaved);
-                });
-            }
-            catch (OperationCanceledException)
-            {
-                // 静默
+                session.Cancel();
             }
             catch
             {
-                ReportStatus(ScrollCaptureService.CaptureFailed);
+            }
+        });
+        session.Begin();
+    }
+
+    private void OnScrollCaptureFinished(ScrollCaptureResult result, AppSettings settingsSnapshot)
+    {
+        void Handle()
+        {
+            try
+            {
+                if (!result.Succeeded || result.Image is null)
+                {
+                    if (!string.IsNullOrEmpty(result.Error))
+                    {
+                        ReportStatus(result.Error!);
+                    }
+
+                    result.Image?.ReleasePixels();
+                    GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                    return;
+                }
+
+                string? saved = null;
+                string? error = null;
+                try
+                {
+                    ImageClipboard.Copy(result.Image);
+                }
+                catch
+                {
+                    error = ScrollCaptureService.CaptureFailed;
+                }
+
+                if (error is null && settingsSnapshot.Capture.SaveFileAfterCapture)
+                {
+                    try
+                    {
+                        saved = PngFileSaver.Save(result.Image, settingsSnapshot.Capture.SaveDirectory);
+                    }
+                    catch (Exception ex)
+                    {
+                        error = "无法保存文件：" + ex.Message;
+                    }
+                }
+
+                result.Image.ReleasePixels();
+                GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                if (error is not null)
+                {
+                    ReportStatus(error);
+                    return;
+                }
+
+                ReportStatus(saved is null
+                    ? ScrollCaptureService.Copied
+                    : ScrollCaptureService.CopiedAndSaved);
             }
             finally
             {
                 _scrollBusy = false;
+                _scrollSession = null;
             }
-        }, token);
+        }
+
+        if (System.Windows.Application.Current.Dispatcher.CheckAccess())
+        {
+            Handle();
+        }
+        else
+        {
+            System.Windows.Application.Current.Dispatcher.Invoke(Handle);
+        }
     }
 
     public void StartCapture()

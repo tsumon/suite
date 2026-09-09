@@ -17,6 +17,9 @@ internal sealed class RegionSelectSession
     private DispatcherTimer? _hoverPoll;
     public bool ShowMagnifier { get; set; } = true;
 
+    /// <summary>Overlay corner hint; null uses CaptureUx.OverlayHint.</summary>
+    public string? OverlayHintText { get; set; }
+
     public PixelRect? Hover { get; private set; }
     public PixelRect? Drag { get; private set; }
     public PixelRect? Committed { get; private set; }

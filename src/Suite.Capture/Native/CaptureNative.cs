@@ -212,6 +212,11 @@ internal static class CaptureNative
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint nFlags);
+
+    internal const int VkEscape = 0x1B;
+
+    [DllImport("user32.dll")]
+    internal static extern short GetAsyncKeyState(int vKey);
 }
 
 [StructLayout(LayoutKind.Sequential)]

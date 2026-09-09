@@ -85,7 +85,7 @@ internal sealed class RegionOverlayWindow : Window
 
         var hint = new TextBlock
         {
-            Text = CaptureUx.OverlayHint,
+            Text = session.OverlayHintText ?? CaptureUx.OverlayHint,
             Foreground = Brushes.White,
             FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"),
             FontSize = 13,
