@@ -160,4 +160,84 @@ public sealed class CaptureUxTests
         Assert.Equal(0, CaptureUx.IndexOfLargestOverlap(monitors, new PixelRect(100, 100, 400, 400)));
         Assert.Equal(-1, CaptureUx.IndexOfLargestOverlap(monitors, new PixelRect(-5000, -5000, 10, 10)));
     }
+
+    [Fact]
+    public void HitTest_interior_is_none()
+    {
+        var sel = new PixelRect(100, 200, 300, 180);
+        Assert.Equal(
+            CaptureUx.ResizeHandle.None,
+            CaptureUx.HitTestResizeHandle(sel, 250, 290, gripPx: 10));
+    }
+
+    [Fact]
+    public void HitTest_corners_win_over_edges()
+    {
+        var sel = new PixelRect(100, 200, 300, 180);
+        const int grip = 10;
+        Assert.Equal(CaptureUx.ResizeHandle.NW, CaptureUx.HitTestResizeHandle(sel, 100, 200, grip));
+        Assert.Equal(CaptureUx.ResizeHandle.NE, CaptureUx.HitTestResizeHandle(sel, 399, 200, grip));
+        Assert.Equal(CaptureUx.ResizeHandle.SW, CaptureUx.HitTestResizeHandle(sel, 100, 379, grip));
+        Assert.Equal(CaptureUx.ResizeHandle.SE, CaptureUx.HitTestResizeHandle(sel, 399, 379, grip));
+    }
+
+    [Fact]
+    public void HitTest_edges_away_from_corners()
+    {
+        var sel = new PixelRect(100, 200, 300, 180);
+        const int grip = 10;
+        Assert.Equal(CaptureUx.ResizeHandle.N, CaptureUx.HitTestResizeHandle(sel, 250, 205, grip));
+        Assert.Equal(CaptureUx.ResizeHandle.S, CaptureUx.HitTestResizeHandle(sel, 250, 375, grip));
+        Assert.Equal(CaptureUx.ResizeHandle.W, CaptureUx.HitTestResizeHandle(sel, 105, 290, grip));
+        Assert.Equal(CaptureUx.ResizeHandle.E, CaptureUx.HitTestResizeHandle(sel, 395, 290, grip));
+    }
+
+    [Fact]
+    public void HitTest_outside_selection_is_none()
+    {
+        var sel = new PixelRect(100, 200, 300, 180);
+        Assert.Equal(
+            CaptureUx.ResizeHandle.None,
+            CaptureUx.HitTestResizeHandle(sel, 99, 200, gripPx: 10));
+        Assert.Equal(
+            CaptureUx.ResizeHandle.None,
+            CaptureUx.HitTestResizeHandle(sel, 400, 290, gripPx: 10));
+        Assert.Equal(
+            CaptureUx.ResizeHandle.None,
+            CaptureUx.HitTestResizeHandle(sel, 250, 380, gripPx: 10));
+    }
+
+    [Fact]
+    public void HitTest_empty_or_bad_grip_is_none()
+    {
+        Assert.Equal(
+            CaptureUx.ResizeHandle.None,
+            CaptureUx.HitTestResizeHandle(default, 0, 0, gripPx: 10));
+        var sel = new PixelRect(0, 0, 50, 50);
+        Assert.Equal(
+            CaptureUx.ResizeHandle.None,
+            CaptureUx.HitTestResizeHandle(sel, 1, 1, gripPx: 0));
+    }
+
+    [Fact]
+    public void HitTest_beyond_grip_interior_is_none()
+    {
+        var sel = new PixelRect(0, 0, 100, 100);
+        Assert.Equal(
+            CaptureUx.ResizeHandle.None,
+            CaptureUx.HitTestResizeHandle(sel, 50, 50, gripPx: 10));
+        // Just outside grip band on north edge center
+        Assert.Equal(
+            CaptureUx.ResizeHandle.None,
+            CaptureUx.HitTestResizeHandle(sel, 50, 10, gripPx: 10));
+        Assert.Equal(
+            CaptureUx.ResizeHandle.N,
+            CaptureUx.HitTestResizeHandle(sel, 50, 9, gripPx: 10));
+    }
+
+    [Fact]
+    public void Resize_grip_default_is_ten()
+    {
+        Assert.Equal(10, CaptureUx.ResizeGripPx);
+    }
 }

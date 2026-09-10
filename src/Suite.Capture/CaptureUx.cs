@@ -151,4 +151,120 @@ public static class CaptureUx
 
         return best;
     }
+
+    /// <summary>Grip thickness (virtual px) for edge/corner resize hit-testing after region release.</summary>
+    public const int ResizeGripPx = 10;
+
+    /// <summary>Selection chrome resize handles (corners win over edges).</summary>
+    public enum ResizeHandle
+    {
+        None = 0,
+        N,
+        S,
+        E,
+        W,
+        NE,
+        NW,
+        SE,
+        SW,
+    }
+
+    /// <summary>
+    /// Hit-test <paramref name="x"/>/<paramref name="y"/> (virtual desktop px) against <paramref name="sel"/>.
+    /// Points outside the selection return None. Corners beat edges. Grip is clamped so tiny
+    /// rects still resolve (closer edge wins if opposite grips overlap).
+    /// </summary>
+    public static ResizeHandle HitTestResizeHandle(PixelRect sel, int x, int y, int gripPx)
+    {
+        if (sel.IsEmpty || gripPx < 1)
+        {
+            return ResizeHandle.None;
+        }
+
+        // Half-open selection: [X, Right) × [Y, Bottom)
+        if (x < sel.X || y < sel.Y || x >= sel.Right || y >= sel.Bottom)
+        {
+            return ResizeHandle.None;
+        }
+
+        int gripX = Math.Min(gripPx, Math.Max(1, sel.Width));
+        int gripY = Math.Min(gripPx, Math.Max(1, sel.Height));
+
+        int distW = x - sel.X;
+        int distE = sel.Right - 1 - x;
+        int distN = y - sel.Y;
+        int distS = sel.Bottom - 1 - y;
+
+        bool nearW = distW < gripX;
+        bool nearE = distE < gripX;
+        bool nearN = distN < gripY;
+        bool nearS = distS < gripY;
+
+        if (nearW && nearE)
+        {
+            if (distW <= distE)
+            {
+                nearE = false;
+            }
+            else
+            {
+                nearW = false;
+            }
+        }
+
+        if (nearN && nearS)
+        {
+            if (distN <= distS)
+            {
+                nearS = false;
+            }
+            else
+            {
+                nearN = false;
+            }
+        }
+
+        if (nearN && nearW)
+        {
+            return ResizeHandle.NW;
+        }
+
+        if (nearN && nearE)
+        {
+            return ResizeHandle.NE;
+        }
+
+        if (nearS && nearW)
+        {
+            return ResizeHandle.SW;
+        }
+
+        if (nearS && nearE)
+        {
+            return ResizeHandle.SE;
+        }
+
+        if (nearN)
+        {
+            return ResizeHandle.N;
+        }
+
+        if (nearS)
+        {
+            return ResizeHandle.S;
+        }
+
+        if (nearW)
+        {
+            return ResizeHandle.W;
+        }
+
+        if (nearE)
+        {
+            return ResizeHandle.E;
+        }
+
+        return ResizeHandle.None;
+    }
+
 }

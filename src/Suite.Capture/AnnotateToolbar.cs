@@ -42,7 +42,7 @@ public static class AnnotateToolbar
     public const double IconSize = 16;
     public const double SelectedDot = 5;
     public const int StrokePx = 3;
-    public const int AnchorDiameter = 8;
+    public const int AnchorDiameter = 12;
 
     /// <summary>RGB swatches matching Tencent-style annotate palette (cyan…red).</summary>
     public static readonly (byte R, byte G, byte B)[] Palette =

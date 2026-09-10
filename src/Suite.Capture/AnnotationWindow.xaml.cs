@@ -64,7 +64,7 @@ public partial class AnnotationWindow : Window
     private bool _dragging;
     private bool _resizing;
     private bool _moving;
-    private Handle _handle = Handle.None;
+    private CaptureUx.ResizeHandle _handle = CaptureUx.ResizeHandle.None;
     private Point _startDip;
     private List<(int X, int Y)>? _stroke;
     private Shape? _draft;
@@ -187,11 +187,6 @@ public partial class AnnotationWindow : Window
         _liveViewport = false;
     }
 
-    private enum Handle
-    {
-        None, N, S, E, W, NE, NW, SE, SW,
-    }
-
     private void BuildChrome()
     {
         BuildFreezeBackdrop();
@@ -232,8 +227,20 @@ public partial class AnnotationWindow : Window
         _border.Fill = Brushes.Transparent;
         _border.IsHitTestVisible = false;
 
+        CaptureUx.ResizeHandle[] handleOrder =
+        [
+            CaptureUx.ResizeHandle.NW,
+            CaptureUx.ResizeHandle.N,
+            CaptureUx.ResizeHandle.NE,
+            CaptureUx.ResizeHandle.E,
+            CaptureUx.ResizeHandle.SE,
+            CaptureUx.ResizeHandle.S,
+            CaptureUx.ResizeHandle.SW,
+            CaptureUx.ResizeHandle.W,
+        ];
         for (int i = 0; i < _anchors.Length; i++)
         {
+            CaptureUx.ResizeHandle handle = handleOrder[i];
             var dot = new Ellipse
             {
                 Width = AnnotateToolbar.AnchorDiameter,
@@ -241,7 +248,10 @@ public partial class AnnotationWindow : Window
                 Fill = AnchorFill,
                 Stroke = CommitInk,
                 StrokeThickness = 1.5,
+                Cursor = CursorForHandle(handle),
+                Tag = handle,
             };
+            // Invisible hit padding via larger stroke thickness is limited; diameter is already 12.
             dot.MouseLeftButtonDown += OnAnchorDown;
             _anchors[i] = dot;
         }
@@ -745,8 +755,39 @@ public partial class AnnotationWindow : Window
         LayoutChrome(rebakePreview: false);
     }
 
-    private void RefreshHostCursor() =>
-        _imageHost.Cursor = _tool is null ? Cursors.SizeAll : Cursors.Cross;
+    private void RefreshHostCursor()
+    {
+        if (_tool is not null)
+        {
+            _imageHost.Cursor = Cursors.Cross;
+            return;
+        }
+
+        _imageHost.Cursor = Cursors.SizeAll;
+    }
+
+    private static Cursor CursorForHandle(CaptureUx.ResizeHandle handle) =>
+        handle switch
+        {
+            CaptureUx.ResizeHandle.N or CaptureUx.ResizeHandle.S => Cursors.SizeNS,
+            CaptureUx.ResizeHandle.E or CaptureUx.ResizeHandle.W => Cursors.SizeWE,
+            CaptureUx.ResizeHandle.NE or CaptureUx.ResizeHandle.SW => Cursors.SizeNESW,
+            CaptureUx.ResizeHandle.NW or CaptureUx.ResizeHandle.SE => Cursors.SizeNWSE,
+            _ => Cursors.SizeAll,
+        };
+
+    private void UpdateIdleResizeCursor(Point windowPos)
+    {
+        if (_tool is not null || _resizing || _moving || _dragging)
+        {
+            return;
+        }
+
+        (int x, int y) = ToVirtual(windowPos);
+        CaptureUx.ResizeHandle handle = CaptureUx.HitTestResizeHandle(
+            _selection, x, y, CaptureUx.ResizeGripPx);
+        _imageHost.Cursor = CursorForHandle(handle);
+    }
 
     private void BuildFreezeBackdrop()
     {
@@ -941,14 +982,14 @@ public partial class AnnotationWindow : Window
         PlaceAnchor(5, selL + (selW / 2), selT + selH); // S
         PlaceAnchor(6, selL, selT + selH); // SW
         PlaceAnchor(7, selL, selT + (selH / 2)); // W
-        _anchors[0].Tag = Handle.NW;
-        _anchors[1].Tag = Handle.N;
-        _anchors[2].Tag = Handle.NE;
-        _anchors[3].Tag = Handle.E;
-        _anchors[4].Tag = Handle.SE;
-        _anchors[5].Tag = Handle.S;
-        _anchors[6].Tag = Handle.SW;
-        _anchors[7].Tag = Handle.W;
+        _anchors[0].Tag = CaptureUx.ResizeHandle.NW;
+        _anchors[1].Tag = CaptureUx.ResizeHandle.N;
+        _anchors[2].Tag = CaptureUx.ResizeHandle.NE;
+        _anchors[3].Tag = CaptureUx.ResizeHandle.E;
+        _anchors[4].Tag = CaptureUx.ResizeHandle.SE;
+        _anchors[5].Tag = CaptureUx.ResizeHandle.S;
+        _anchors[6].Tag = CaptureUx.ResizeHandle.SW;
+        _anchors[7].Tag = CaptureUx.ResizeHandle.W;
     }
 
     private void UpdateDims(double selL, double selT, double selW, double selH)
@@ -1249,17 +1290,25 @@ public partial class AnnotationWindow : Window
 
     private void OnAnchorDown(object sender, MouseButtonEventArgs e)
     {
-        if (sender is not Ellipse ellipse || ellipse.Tag is not Handle handle)
+        if (sender is not Ellipse ellipse || ellipse.Tag is not CaptureUx.ResizeHandle handle)
         {
             return;
         }
 
+        BeginResize(handle);
+        e.Handled = true;
+    }
+
+    private void BeginResize(CaptureUx.ResizeHandle handle)
+    {
         _resizing = true;
+        _moving = false;
         _handle = handle;
         _resizeOrigin = _selection;
         BeginRubberResize();
         CaptureMouse();
-        e.Handled = true;
+        Cursor = CursorForHandle(handle);
+        _imageHost.Cursor = Cursor;
     }
 
     private void OnCanvasDown(object sender, MouseButtonEventArgs e)
@@ -1286,14 +1335,25 @@ public partial class AnnotationWindow : Window
 
         if (_tool is null)
         {
-            // 无绘制工具：在预览上拖动 = 平移选区（保持 W×H）
+            // 无绘制工具：边缘/角 = 缩放；内部 = 平移（Snipaste）
+            (int vx, int vy) = ToVirtual(e.GetPosition(this));
+            CaptureUx.ResizeHandle edge = CaptureUx.HitTestResizeHandle(
+                _selection, vx, vy, CaptureUx.ResizeGripPx);
+            if (edge != CaptureUx.ResizeHandle.None)
+            {
+                BeginResize(edge);
+                e.Handled = true;
+                return;
+            }
+
             _moving = true;
             _moveOrigin = _selection;
-            _moveStartVirtual = ToVirtual(e.GetPosition(this));
+            _moveStartVirtual = (vx, vy);
             EnterLiveViewport();
             AttachLiveTransform();
             HookLiveRendering();
             CaptureMouse();
+            _imageHost.Cursor = Cursors.SizeAll;
             e.Handled = true;
             return;
         }
@@ -1422,6 +1482,7 @@ public partial class AnnotationWindow : Window
 
         if (!_dragging)
         {
+            UpdateIdleResizeCursor(e.GetPosition(this));
             return;
         }
 
@@ -1483,7 +1544,10 @@ public partial class AnnotationWindow : Window
         if (_resizing || _moving)
         {
             OnCanvasMove(this, e);
+            return;
         }
+
+        UpdateIdleResizeCursor(e.GetPosition(this));
     }
 
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
@@ -1492,7 +1556,7 @@ public partial class AnnotationWindow : Window
         if (_resizing)
         {
             _resizing = false;
-            _handle = Handle.None;
+            _handle = CaptureUx.ResizeHandle.None;
             UnhookLiveRendering();
             if (IsMouseCaptured)
             {
@@ -1661,6 +1725,7 @@ public partial class AnnotationWindow : Window
         _previewBmp = null;
         RefreshHistory();
         LayoutChrome();
+        RefreshHostCursor();
         RegionChanged?.Invoke(_selection);
     }
 
@@ -1683,6 +1748,7 @@ public partial class AnnotationWindow : Window
         _bakeDirty = true;
         RefreshHistory();
         LayoutChrome();
+        RefreshHostCursor();
         RegionChanged?.Invoke(_selection);
     }
 
@@ -1697,7 +1763,7 @@ public partial class AnnotationWindow : Window
         return CaptureUx.UnionMonitorBounds(list, _monitor.Bounds);
     }
 
-    private static PixelRect ResizeRect(PixelRect start, Handle handle, int x, int y)
+    private static PixelRect ResizeRect(PixelRect start, CaptureUx.ResizeHandle handle, int x, int y)
     {
         int l = start.X;
         int t = start.Y;
@@ -1705,25 +1771,25 @@ public partial class AnnotationWindow : Window
         int b = start.Bottom;
         switch (handle)
         {
-            case Handle.N:
+            case CaptureUx.ResizeHandle.N:
                 t = y;
                 break;
-            case Handle.S:
+            case CaptureUx.ResizeHandle.S:
                 b = y;
                 break;
-            case Handle.E:
+            case CaptureUx.ResizeHandle.E:
                 r = x;
                 break;
-            case Handle.W:
+            case CaptureUx.ResizeHandle.W:
                 l = x;
                 break;
-            case Handle.NE:
+            case CaptureUx.ResizeHandle.NE:
                 return ScaleCorner(start, start.X, start.Bottom, x, y);
-            case Handle.NW:
+            case CaptureUx.ResizeHandle.NW:
                 return ScaleCorner(start, start.Right, start.Bottom, x, y);
-            case Handle.SE:
+            case CaptureUx.ResizeHandle.SE:
                 return ScaleCorner(start, start.X, start.Y, x, y);
-            case Handle.SW:
+            case CaptureUx.ResizeHandle.SW:
                 return ScaleCorner(start, start.Right, start.Y, x, y);
         }
 
