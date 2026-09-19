@@ -34,6 +34,7 @@ public sealed class AppController : IDisposable
     private PinManageWindow? _pinManageWindow;
     private ColorPickSession? _colorPick;
     private readonly List<NetSpeedTrayWidget> _secondaryOverlays = [];
+    private CancellationTokenSource? _taskbarFxQueueCts;
     private string _lastStartLabel = "正常";
     private int _taskbarFxFailCount;
     private bool _disposed;
@@ -366,6 +367,9 @@ public sealed class AppController : IDisposable
         }
 
         _disposed = true;
+        _taskbarFxQueueCts?.Cancel();
+        _taskbarFxQueueCts?.Dispose();
+        _taskbarFxQueueCts = null;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         _scrollCts?.Cancel();
         _scrollCts?.Dispose();
@@ -413,24 +417,31 @@ public sealed class AppController : IDisposable
     private void QueueTaskbarFx(TaskbarFxSettings settings, bool shutdownWhenDisabled, int delayMs = 0)
     {
         TaskbarFxSettings snapshot = settings.Clone();
+        _taskbarFxQueueCts?.Cancel();
+        _taskbarFxQueueCts?.Dispose();
+        var queueCts = new CancellationTokenSource();
+        _taskbarFxQueueCts = queueCts;
+        CancellationToken token = queueCts.Token;
         _ = Task.Run(async () =>
         {
-            if (delayMs > 0)
-            {
-                await Task.Delay(delayMs).ConfigureAwait(false);
-            }
-
-            TaskbarFxStatusDto status;
             try
             {
-                status = await _taskbarFx.ApplyAsync(snapshot, shutdownWhenDisabled)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                SuiteLog.Error("TaskbarFx.ApplyAsync", ex);
-                return; // FX must never take down Suite or netspeed.
-            }
+                if (delayMs > 0)
+                {
+                    await Task.Delay(delayMs, token).ConfigureAwait(false);
+                }
+
+                TaskbarFxStatusDto status;
+                try
+                {
+                    status = await _taskbarFx.ApplyAsync(snapshot, shutdownWhenDisabled)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    SuiteLog.Error("TaskbarFx.ApplyAsync", ex);
+                    return; // FX must never take down Suite or netspeed.
+                }
             string message = FormatTaskbarStatus(status);
             SuiteLog.Info(
                 "taskbarFx path=" + status.Path
@@ -452,10 +463,14 @@ public sealed class AppController : IDisposable
                 Interlocked.Exchange(ref _taskbarFxFailCount, 0);
             }
 
-            try
-            {
-                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                try
                 {
+                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                    {
+                        if (token.IsCancellationRequested)
+                        {
+                            return;
+                        }
                     _settingsWindow?.SetTaskbarStatus(message);
                     if (balloon)
                     {
@@ -483,9 +498,13 @@ public sealed class AppController : IDisposable
                         ApplyNetSpeedPresentation(live.NetSpeed.Visible, live.NetSpeed.EmbedInTaskbar);
                         ApplySecondaryNetSpeed(live);
                     }
-                });
+                    });
+                }
+                catch
+                {
+                }
             }
-            catch
+            catch (OperationCanceledException)
             {
             }
         });

@@ -45,34 +45,50 @@ public sealed class CaptureService : IDisposable
         _busy = true;
         Task.Run(() =>
         {
+            IReadOnlyList<MonitorCapture>? capturedFrames = null;
             try
             {
-                IReadOnlyList<MonitorCapture> frames = ScreenCapturePipeline.CaptureAll();
+                capturedFrames = ScreenCapturePipeline.CaptureAll();
                 _dispatcher.Invoke(() =>
                 {
                     if (_disposed)
                     {
-                        ReleaseFrames(frames);
+                        ReleaseFrames(capturedFrames);
+                        capturedFrames = null;
                         return;
                     }
 
-                    _activeFrames = frames;
-                    ShowSelect(frames, request, completed);
+                    _activeFrames = capturedFrames;
+                    ShowSelect(capturedFrames, request, completed);
+                    capturedFrames = null;
                 });
             }
             catch (Exception ex)
             {
-                _dispatcher.Invoke(() =>
+                if (capturedFrames is not null)
                 {
-                    if (_disposed)
-                    {
-                        return;
-                    }
+                    ReleaseFrames(capturedFrames);
+                    capturedFrames = null;
+                }
 
+                try
+                {
+                    _dispatcher.Invoke(() =>
+                    {
+                        if (_disposed)
+                        {
+                            return;
+                        }
+
+                        _busy = false;
+                        completed(new CaptureResult { Error = "无法截屏。" + ex.Message });
+                        AppendLog("fail " + ex.Message);
+                    });
+                }
+                catch
+                {
                     _busy = false;
-                    completed(new CaptureResult { Error = "无法截屏。" + ex.Message });
-                    AppendLog("fail " + ex.Message);
-                });
+                }
             }
         });
     }

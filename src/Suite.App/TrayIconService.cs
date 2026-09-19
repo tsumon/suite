@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Suite.Contracts;
 
@@ -139,7 +140,7 @@ public sealed class TrayIconService : IDisposable
 
     private static Icon CreateIcon()
     {
-        var bmp = new Bitmap(16, 16);
+        using var bmp = new Bitmap(16, 16);
         using (var g = Graphics.FromImage(bmp))
         {
             g.Clear(Color.FromArgb(36, 36, 40));
@@ -149,6 +150,18 @@ public sealed class TrayIconService : IDisposable
             g.FillRectangle(inner, 6, 6, 4, 4);
         }
 
-        return Icon.FromHandle(bmp.GetHicon());
+        IntPtr handle = bmp.GetHicon();
+        try
+        {
+            using var source = Icon.FromHandle(handle);
+            return (Icon)source.Clone();
+        }
+        finally
+        {
+            DestroyIcon(handle);
+        }
     }
+
+    [DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr hIcon);
 }

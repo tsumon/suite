@@ -21,6 +21,7 @@ internal sealed class TaskbarFxRuntime : IDisposable
     private DateTime _restartWindowUtc = DateTime.MinValue;
     private CancellationTokenSource? _watchCts;
     private Task? _watchTask;
+    private bool _disposed;
 
     public const int RestartMaxAttempts = 5;
     public static readonly TimeSpan RestartWindow = TimeSpan.FromSeconds(30);
@@ -55,7 +56,7 @@ internal sealed class TaskbarFxRuntime : IDisposable
 
     public void StartWatch()
     {
-        if (_watchCts is not null)
+        if (_disposed || _watchCts is not null)
         {
             return;
         }
@@ -66,17 +67,21 @@ internal sealed class TaskbarFxRuntime : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         _watchCts?.Cancel();
         try
         {
-            _watchTask?.Wait(TimeSpan.FromSeconds(1));
+            _watchTask?.Wait(TimeSpan.FromSeconds(3));
         }
         catch (AggregateException)
         {
         }
 
         _watchCts?.Dispose();
-        _native.Dispose();
+        if (_watchTask is null || _watchTask.IsCompleted)
+        {
+            _native.Dispose();
+        }
     }
 
     private async Task WatchLoop(CancellationToken cancellationToken)

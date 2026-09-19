@@ -18,7 +18,7 @@ public static class NetSpeedCopy
     public static string EmbedFailed(string? reason)
     {
         string mapped = MapReason(reason);
-        return string.IsNullOrEmpty(mapped) ? EmbedFailedPrefix : EmbedFailedPrefix + " " + mapped;
+        return string.IsNullOrEmpty(mapped) ? EmbedFailedPrefix : EmbedFailedPrefix + mapped;
     }
 
     public static string MapReason(string? raw)
@@ -36,17 +36,17 @@ public static class NetSpeedCopy
             return ReasonNoTray;
         }
 
-        if (text.Contains("SetParent", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("不允许", StringComparison.Ordinal))
-        {
-            return ReasonSetParent;
-        }
-
         if (text.Contains("布局", StringComparison.Ordinal)
             || text.Contains("小组件", StringComparison.Ordinal)
             || text.Contains("挤", StringComparison.Ordinal))
         {
             return ReasonLayout;
+        }
+
+        if (text.Contains("SetParent", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("不允许", StringComparison.Ordinal))
+        {
+            return ReasonSetParent;
         }
 
         if (text.Contains("客户区", StringComparison.Ordinal)

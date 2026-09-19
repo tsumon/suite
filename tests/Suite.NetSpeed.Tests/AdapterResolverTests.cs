@@ -99,6 +99,46 @@ public sealed class AdapterResolverTests
         Assert.Null(AdapterResolver.Resolve(Array.Empty<InterfaceSnapshot>(), 1, "x"));
     }
 
+    [Fact]
+    public void Automatic_selection_moves_to_adapter_with_new_traffic()
+    {
+        var previous = new[]
+        {
+            Up("Ethernet", 12, inOctets: 10_000),
+            Up("Wi-Fi", 3, inOctets: 20_000),
+        };
+        var current = new[]
+        {
+            Up("Ethernet", 12, inOctets: 10_000),
+            Up("Wi-Fi", 3, inOctets: 25_000),
+        };
+
+        InterfaceSnapshot? hit = AdapterResolver.Resolve(current, 12, "Ethernet", previous);
+
+        Assert.NotNull(hit);
+        Assert.Equal(3u, hit.IfIndex);
+    }
+
+    [Fact]
+    public void Automatic_selection_keeps_preferred_adapter_when_it_has_traffic()
+    {
+        var previous = new[]
+        {
+            Up("Ethernet", 12, inOctets: 10_000),
+            Up("Wi-Fi", 3, inOctets: 20_000),
+        };
+        var current = new[]
+        {
+            Up("Ethernet", 12, inOctets: 12_000),
+            Up("Wi-Fi", 3, inOctets: 25_000),
+        };
+
+        InterfaceSnapshot? hit = AdapterResolver.Resolve(current, 12, "Ethernet", previous);
+
+        Assert.NotNull(hit);
+        Assert.Equal(12u, hit.IfIndex);
+    }
+
     private static InterfaceSnapshot Up(string alias, uint ifIndex, ulong inOctets = 0) => new()
     {
         Alias = alias,

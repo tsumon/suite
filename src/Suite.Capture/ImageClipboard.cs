@@ -5,8 +5,12 @@ using System.Windows.Media.Imaging;
 namespace Suite.Capture;
 
 /// <summary>
-/// Put formats chat apps (Electron/Chromium) and WeChat-class tools actually read.
-/// byte[] under "PNG" often fails paste in Grok Bot; MemoryStream + image/png works better.
+/// Put an image on the Windows clipboard using materialized standard formats.
+///
+/// Desktop apps commonly consume CF_BITMAP/CF_DIB, while browsers and chat
+/// inputs commonly look for image/png. Keep all three representations, but
+/// store PNG in a rewinded, materialized MemoryStream so clipboard consumers
+/// receive the raw PNG bytes rather than a serialized .NET byte array.
 /// </summary>
 public static class ImageClipboard
 {
@@ -18,18 +22,24 @@ public static class ImageClipboard
             source.Freeze();
         }
 
-        using var png = new MemoryStream();
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(source));
-        encoder.Save(png);
-        byte[] bytes = png.ToArray();
+        DataObject data = CreateDataObject(source);
+        Clipboard.SetDataObject(data, true);
+    }
 
+    internal static DataObject CreateDataObjectForTest(BitmapSource source) => CreateDataObject(source);
+
+    private static DataObject CreateDataObject(BitmapSource source)
+    {
         var data = new DataObject();
         data.SetImage(source);
-        // Chromium / many messengers prefer a seekable PNG stream, not a raw byte[].
-        data.SetData("PNG", new MemoryStream(bytes), false);
-        data.SetData("image/png", new MemoryStream(bytes), false);
-        Clipboard.SetDataObject(data, true);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(source));
+        using var encoded = new MemoryStream();
+        encoder.Save(encoded);
+        byte[] png = encoded.ToArray();
+        data.SetData("PNG", new MemoryStream(png, writable: false), false);
+        data.SetData("image/png", new MemoryStream(png, writable: false), false);
+        return data;
     }
 
     public static bool TryGet(out BitmapSource? image)

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Suite.Capture.Native;
+using Windows.Foundation;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
@@ -24,6 +25,9 @@ internal static class GraphicsCaptureGrabber
         Direct3D11CaptureFramePool? pool = null;
         GraphicsCaptureSession? session = null;
         Direct3D11CaptureFrame? frame = null;
+        ManualResetEventSlim? arrived = null;
+        TypedEventHandler<Direct3D11CaptureFramePool, object>? frameArrived = null;
+        int callbackClosed = 0;
         try
         {
             if (!GraphicsCaptureSession.IsSupported())
@@ -92,11 +96,16 @@ internal static class GraphicsCaptureGrabber
             {
             }
 
-            using var arrived = new ManualResetEventSlim(false);
+            arrived = new ManualResetEventSlim(false);
             Direct3D11CaptureFrame? captured = null;
             Direct3D11CaptureFramePool framePool = pool;
-            framePool.FrameArrived += (_, _) =>
+            frameArrived = (_, _) =>
             {
+                if (Volatile.Read(ref callbackClosed) != 0)
+                {
+                    return;
+                }
+
                 if (captured is null)
                 {
                     captured = framePool.TryGetNextFrame();
@@ -104,6 +113,7 @@ internal static class GraphicsCaptureGrabber
 
                 arrived.Set();
             };
+            framePool.FrameArrived += frameArrived;
             session.StartCapture();
             arrived.Wait(TimeSpan.FromMilliseconds(1500));
             if (captured is null)
@@ -137,6 +147,13 @@ internal static class GraphicsCaptureGrabber
         }
         finally
         {
+            Volatile.Write(ref callbackClosed, 1);
+            if (pool is not null && frameArrived is not null)
+            {
+                pool.FrameArrived -= frameArrived;
+            }
+
+            arrived?.Dispose();
             DisposeWinRt(frame);
             DisposeWinRt(session);
             DisposeWinRt(pool);

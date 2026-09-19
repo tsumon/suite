@@ -54,13 +54,14 @@ public static class ScreenshotHistory
             return null;
         }
 
+        string? temp = null;
         try
         {
             string dir = DirectoryFor(settings);
             Directory.CreateDirectory(dir);
             string name = "hist-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png";
             string path = Path.Combine(dir, name);
-            string temp = path + ".tmp";
+            temp = path + ".tmp";
             var encoder = new PngBitmapEncoder();
             BitmapSource src = image;
             if (src.CanFreeze && !src.IsFrozen)
@@ -81,6 +82,16 @@ public static class ScreenshotHistory
         }
         catch
         {
+            try
+            {
+                if (temp is not null && File.Exists(temp))
+                {
+                    File.Delete(temp);
+                }
+            }
+            catch
+            {
+            }
             return null;
         }
     }

@@ -18,6 +18,11 @@ internal sealed class TaskbarFxClient : IDisposable
         await _gate.WaitAsync(gateTimeout.Token).ConfigureAwait(false);
         try
         {
+            if (_disposed)
+            {
+                return Unavailable("Suite 正在退出。截图和网速仍可用。");
+            }
+
             if (!_watching)
             {
                 _runtime.StartWatch();
@@ -61,8 +66,19 @@ internal sealed class TaskbarFxClient : IDisposable
 
         _disposed = true;
         DropWatch(reset: false);
-        _runtime.Dispose();
-        _gate.Dispose();
+        bool acquired = false;
+        try
+        {
+            acquired = _gate.Wait(TimeSpan.FromSeconds(3));
+            _runtime.Dispose();
+        }
+        finally
+        {
+            if (acquired)
+            {
+                _gate.Release();
+            }
+        }
     }
 
     private void DropWatch(bool reset)

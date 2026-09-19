@@ -26,6 +26,7 @@ public partial class NetSpeedWindow : Window
     private double _lastDownBps;
     private double _lastUpBps;
     private bool _adapterMissing;
+    private bool _closed;
     /// <summary>True only while WS_EX_LAYERED + LWA_COLORKEY are confirmed active.</summary>
     private bool _chromaActive;
     /// <summary>Transparent requested but chroma failed — solid non-pink fill (tray-matched or #2B2B2B).</summary>
@@ -59,6 +60,7 @@ public partial class NetSpeedWindow : Window
                 ApplyEmbedSurface(EnsureHandle());
             }
         };
+        Closed += (_, _) => _closed = true;
     }
 
     public event EventHandler? PositionChangedByUser;
@@ -346,9 +348,14 @@ public partial class NetSpeedWindow : Window
 
     public void DetachFromTaskbar()
     {
+        if (_closed || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
         StopHeartbeat();
         StopChromaWatchdog();
-        IntPtr hwnd = EnsureHandle();
+        IntPtr hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd != IntPtr.Zero)
         {
             TaskbarEmbed.ClearChromaKeyTransparency(hwnd);
@@ -359,7 +366,10 @@ public partial class NetSpeedWindow : Window
         _chromaActive = false;
         _safeOpaqueFallback = false;
         RefreshChrome();
-        Topmost = true;
+        if (!_closed)
+        {
+            Topmost = true;
+        }
     }
 
     private void OnDrag(object sender, MouseButtonEventArgs e)
@@ -525,11 +535,13 @@ public partial class NetSpeedWindow : Window
             : (dark ? MediaColor.FromRgb(0xF0, 0xF0, 0xF0) : MediaColor.FromRgb(0x1A, 0x1A, 0x1A));
         MediaColor zero = MediaColor.FromRgb(0x88, 0x88, 0x88);
 
+        MediaColor downAccent = dark ? MediaColor.FromRgb(0x63, 0xC7, 0xFF) : MediaColor.FromRgb(0x08, 0x6F, 0xA8);
+        MediaColor upAccent = dark ? MediaColor.FromRgb(0x7E, 0xE7, 0x87) : MediaColor.FromRgb(0x16, 0x80, 0x3C);
         MediaColor downColor = forceHiContrast
-            ? ink
+            ? ResolveLineColor(null, downAccent, zero, _lastDownBps, _adapterMissing)
             : ResolveLineColor(_appearance.DownColorArgb, ink, zero, _lastDownBps, _adapterMissing);
         MediaColor upColor = forceHiContrast
-            ? (dark ? MediaColor.FromRgb(0xD0, 0xD0, 0xD0) : MediaColor.FromRgb(0x33, 0x33, 0x33))
+            ? ResolveLineColor(null, upAccent, zero, _lastUpBps, _adapterMissing)
             : ResolveLineColor(_appearance.UpColorArgb, ink, zero, _lastUpBps, _adapterMissing);
         DownText.Foreground = new SolidColorBrush(downColor);
         UpText.Foreground = new SolidColorBrush(upColor);

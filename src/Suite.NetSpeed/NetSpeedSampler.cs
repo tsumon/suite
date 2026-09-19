@@ -8,6 +8,7 @@ public sealed class NetSpeedSampler : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _loop;
     private InterfaceSnapshot? _previous;
+    private IReadOnlyList<InterfaceSnapshot>? _previousTable;
     private DateTime _previousUtc;
     private uint? _preferredIfIndex;
     private string? _preferredAlias;
@@ -28,6 +29,7 @@ public sealed class NetSpeedSampler : IDisposable
             _preferredIfIndex = ifIndex;
             _preferredAlias = alias;
             _previous = null;
+            _previousTable = null;
         }
     }
 
@@ -38,6 +40,7 @@ public sealed class NetSpeedSampler : IDisposable
         lock (_gate)
         {
             _previous = null;
+            _previousTable = null;
         }
     }
 
@@ -134,16 +137,18 @@ public sealed class NetSpeedSampler : IDisposable
         uint? preferredIndex;
         string? preferredAlias;
         InterfaceSnapshot? previous;
+        IReadOnlyList<InterfaceSnapshot>? previousTable;
         DateTime previousUtc;
         lock (_gate)
         {
             preferredIndex = _preferredIfIndex;
             preferredAlias = _preferredAlias;
             previous = _previous;
+            previousTable = _previousTable;
             previousUtc = _previousUtc;
         }
 
-        InterfaceSnapshot? resolved = AdapterResolver.Resolve(table, preferredIndex, preferredAlias);
+        InterfaceSnapshot? resolved = AdapterResolver.Resolve(table, preferredIndex, preferredAlias, previousTable);
         InterfaceSnapshot? current = resolved is null ? null : (_table.GetEntry(resolved.IfIndex) ?? resolved);
         if (current is null)
         {
@@ -175,6 +180,7 @@ public sealed class NetSpeedSampler : IDisposable
         lock (_gate)
         {
             _previous = current;
+            _previousTable = table.ToArray();
             _previousUtc = now;
             _preferredIfIndex = current.IfIndex;
             _preferredAlias = current.Alias;

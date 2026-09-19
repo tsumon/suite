@@ -193,6 +193,12 @@ public sealed class NetSpeedTrayWidget : Form
             ? DrawingColor.FromArgb(0xF0, 0xF0, 0xF0)
             : DrawingColor.FromArgb(0x1A, 0x1A, 0x1A);
         DrawingColor zero = DrawingColor.FromArgb(0x88, 0x88, 0x88);
+        DrawingColor downInk = dark
+            ? DrawingColor.FromArgb(0x63, 0xC7, 0xFF)
+            : DrawingColor.FromArgb(0x08, 0x6F, 0xA8);
+        DrawingColor upInk = dark
+            ? DrawingColor.FromArgb(0x7E, 0xE7, 0x87)
+            : DrawingColor.FromArgb(0x16, 0x80, 0x3C);
 
         string downText;
         string upText;
@@ -211,8 +217,8 @@ public sealed class NetSpeedTrayWidget : Form
             singleText = BuildSingleLine(downText, upText);
         }
 
-        DrawingColor downColor = ResolveLineColor(_appearance.DownColorArgb, ink, zero, _lastDownBps, _adapterMissing);
-        DrawingColor upColor = ResolveLineColor(_appearance.UpColorArgb, ink, zero, _lastUpBps, _adapterMissing);
+        DrawingColor downColor = ResolveLineColor(_appearance.DownColorArgb, downInk, zero, _lastDownBps, _adapterMissing);
+        DrawingColor upColor = ResolveLineColor(_appearance.UpColorArgb, upInk, zero, _lastUpBps, _adapterMissing);
 
         float fontDip = (float)TaskbarSlotChrome.ClampFontSize(_appearance.FontSizeDip);
         uint dpi = TaskbarEmbed.DpiFor(Handle);

@@ -9,7 +9,7 @@ public static class TaskbarFxCopy
     public const string Applied = "任务栏效果已应用。";
     public const string Closed = "任务栏效果已关闭。";
     public const string InitFailed = "无法启用任务栏效果。截图和网速仍可用。";
-    public const string BlockedBySecurity = "任务栏效果被安全软件拦住。截图和网速仍可用。";
+    public const string BlockedBySecurity = "无法应用任务栏效果：安全软件可能拦截了操作。截图和网速仍可用。";
     public const string StillAvailable = "截图和网速仍可用。";
     public const string PendingFills = "暂时找不到任务栏背景，请再点一次应用。";
     public const string EnableHelp =
