@@ -1,0 +1,13 @@
+[package]
+name = "suite-netspeed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "IP Helper GetIfTable2/GetIfEntry2 adapter resolution, rate calculation, and 1Hz sampler for Suite."
+
+[dependencies]
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+] }

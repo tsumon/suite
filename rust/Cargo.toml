@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/suite-contracts",
+    "crates/suite-platform",
+    "crates/suite-netspeed",
+    "crates/suite-theme",
+    "crates/suite-taskbarfx",
+    "crates/suite-capture",
+    "crates/suite-app",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+authors = ["tsumon / Suite contributors"]
+
+[workspace.dependencies]
+suite-contracts = { path = "crates/suite-contracts" }
+suite-platform = { path = "crates/suite-platform" }
+suite-netspeed = { path = "crates/suite-netspeed" }
+suite-theme = { path = "crates/suite-theme" }
+suite-taskbarfx = { path = "crates/suite-taskbarfx" }
+suite-capture = { path = "crates/suite-capture" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+png = "0.17"
+thiserror = "2"
+windows-core = "0.61"
+windows = "0.61.3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "unwind"

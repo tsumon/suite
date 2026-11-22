@@ -1,0 +1,43 @@
+[package]
+name = "suite-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native Win32 + Direct2D/DirectWrite tray host for Suite."
+
+[[bin]]
+name = "Suite"
+path = "src/main.rs"
+
+[dependencies]
+suite-contracts.workspace = true
+suite-platform.workspace = true
+suite-netspeed.workspace = true
+suite-theme.workspace = true
+suite-taskbarfx.workspace = true
+suite-capture.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+windows-core.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Networking_WinHttp",
+    "Win32_System_Com",
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_UI_Controls",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

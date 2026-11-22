@@ -1,0 +1,23 @@
+[package]
+name = "suite-platform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Win32 primitives for Suite: single-instance mutex, Personalize & Run registry, async ImmersiveColorSet broadcast, taskbar probing/docking/ULW, CrashGuard, and logging."
+
+[dependencies]
+suite-contracts.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+windows-core.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

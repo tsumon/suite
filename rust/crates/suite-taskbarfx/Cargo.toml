@@ -1,0 +1,18 @@
+[package]
+name = "suite-taskbarfx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Taskbar appearance engine: Win10 SWCA + Win11 XAML Diagnostics TAP shared-memory host (replaces TaskbarFx.Native.dll)."
+
+[dependencies]
+suite-contracts.workspace = true
+suite-platform.workspace = true
+windows-core.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }

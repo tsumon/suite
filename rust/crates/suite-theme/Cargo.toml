@@ -1,0 +1,10 @@
+[package]
+name = "suite-theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "One-click Windows Light/Dark Personalize registry toggle and async ImmersiveColorSet broadcaster."
+
+[dependencies]
+suite-contracts.workspace = true
+suite-platform.workspace = true

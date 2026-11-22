@@ -92,3 +92,8 @@ appsettings.*.local.json
 # JetBrains Rider
 .idea/
 *.sln.iml
+
+# Rust workspace & portable staging outputs
+rust/target/
+dist-rs/
+
