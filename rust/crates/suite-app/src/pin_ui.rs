@@ -3,21 +3,26 @@ use std::rc::Rc;
 
 use suite_capture::{ImageClipboard, MonitorEnumerator, PixelBuffer, save_png_atomic};
 use suite_contracts::ThemeKind;
-use suite_platform::TaskbarEmbed;
-use suite_platform::constants::to_wide_null;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use suite_platform::{PersonalizeRegistry, TaskbarEmbed, constants::to_wide_null};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    CreateSolidBrush, DeleteObject, FillRect, HBRUSH, HDC, SetBkColor, SetTextColor,
+};
+use windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_DELETE, VK_ESCAPE, VK_MENU,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     GetCursorPos, GetWindowLongPtrW, GWLP_USERDATA, HMENU, HTCAPTION, HWND_TOPMOST, KillTimer,
-    MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, PostMessageW, SW_SHOW, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_COMMAND,
-    WM_CONTEXTMENU, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_NCLBUTTONDOWN, WM_RBUTTONUP, WM_TIMER,
-    WS_CHILD, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+    MF_CHECKED, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, PostMessageW, SW_HIDE, SW_SHOW,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+    WINDOW_EX_STYLE, WM_COMMAND, WM_CONTEXTMENU, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY,
+    WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_NCDESTROY, WM_NCLBUTTONDOWN, WM_RBUTTONUP, WM_TIMER, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN,
+    WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_OVERLAPPED, WS_POPUP, WS_SYSMENU,
+    WS_VISIBLE,
 };
 use windows::core::PCWSTR;
 
@@ -26,8 +31,9 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 use crate::d2d::D2dRenderer;
 use crate::messages::{AppCommand, WM_APP_PIN_CHANGED, WM_APP_PIN_MANAGE_CLOSED, post_command};
 use crate::win32_util::{
-    confirm_warning, create_ui_font, hinstance, register_window_class, save_png_dialog,
-    set_control_font,
+    apply_control_theme, apply_window_theme, centered_origin_on_cursor_monitor, confirm_warning,
+    create_ui_font, dpi_for_cursor, hinstance, invalidate_all, register_window_class, s_px,
+    save_png_dialog, set_control_font,
 };
 
 const PIN_WND_CLASS: &str = "SuitePinWindowWnd";
@@ -39,6 +45,9 @@ const TIMER_HUE: usize = 1;
 pub struct PinInfo {
     pub index: usize,
     pub is_click_through: bool,
+    pub width: i32,
+    pub height: i32,
+    pub scale_pct: i32,
 }
 
 struct PinInner {
@@ -149,6 +158,11 @@ impl PinWindow {
 
     pub fn is_click_through(&self) -> bool {
         self.inner.borrow().click_through
+    }
+
+    pub fn dimensions(&self) -> (i32, i32, i32) {
+        let st = self.inner.borrow();
+        (st.image.width, st.image.height, (st.scale * 100.0).round() as i32)
     }
 
     pub fn apply_theme(&self, theme: ThemeKind) {
@@ -619,9 +633,15 @@ impl PinboardService {
         self.pins
             .iter()
             .enumerate()
-            .map(|(i, p)| PinInfo {
-                index: i + 1,
-                is_click_through: p.is_click_through(),
+            .map(|(i, p)| {
+                let (width, height, scale_pct) = p.dimensions();
+                PinInfo {
+                    index: i + 1,
+                    is_click_through: p.is_click_through(),
+                    width,
+                    height,
+                    scale_pct,
+                }
             })
             .collect()
     }
@@ -660,8 +680,12 @@ impl PinboardService {
 struct PinManageState {
     hwnd: HWND,
     controller: HWND,
+    dpi: u32,
+    light: bool,
+    bg_brush: HBRUSH,
     font: windows::Win32::Graphics::Gdi::HFONT,
     children: Vec<HWND>,
+    static_buttons: Vec<HWND>,
     empty_label: HWND,
 }
 
@@ -686,14 +710,43 @@ impl PinManageWindow {
         }
 
         register_window_class(PIN_MANAGE_CLASS, Some(pin_manage_proc), false, None);
-        let font = create_ui_font(14, false, false, "Microsoft YaHei UI");
+        let dpi = dpi_for_cursor();
+        let light = PersonalizeRegistry::try_read()
+            .map(|p| p.apps_use_light)
+            .unwrap_or(true);
+        let bg_brush = unsafe {
+            CreateSolidBrush(if light {
+                COLORREF(0x00F6_F6F6)
+            } else {
+                COLORREF(0x0024_2424)
+            })
+        };
+        let font = create_ui_font(s_px(13, dpi), false, false, "Microsoft YaHei UI");
         let state = Rc::new(RefCell::new(PinManageState {
             hwnd: HWND::default(),
             controller,
+            dpi,
+            light,
+            bg_brush,
             font,
             children: Vec::new(),
+            static_buttons: Vec::new(),
             empty_label: HWND::default(),
         }));
+        let style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+        let mut adj = RECT {
+            left: 0,
+            top: 0,
+            right: s_px(480, dpi),
+            bottom: s_px(400, dpi),
+        };
+        unsafe {
+            let _ = AdjustWindowRectExForDpi(&mut adj, style, false, WINDOW_EX_STYLE(0), dpi);
+        }
+        let win_w = (adj.right - adj.left).max(s_px(480, dpi));
+        let win_h = (adj.bottom - adj.top).max(s_px(400, dpi));
+        let (wx, wy) = centered_origin_on_cursor_monitor(win_w, win_h);
+
         let cls = to_wide_null(PIN_MANAGE_CLASS);
         let title = to_wide_null("贴图管理");
         let raw_ptr = Rc::into_raw(Rc::clone(&state));
@@ -702,13 +755,11 @@ impl PinManageWindow {
                 Default::default(),
                 PCWSTR(cls.as_ptr()),
                 PCWSTR(title.as_ptr()),
-                windows::Win32::UI::WindowsAndMessaging::WS_OVERLAPPED
-                    | windows::Win32::UI::WindowsAndMessaging::WS_CAPTION
-                    | windows::Win32::UI::WindowsAndMessaging::WS_SYSMENU,
-                200,
-                200,
-                420,
-                380,
+                style,
+                wx,
+                wy,
+                win_w,
+                win_h,
                 None,
                 None,
                 Some(hinstance()),
@@ -725,11 +776,13 @@ impl PinManageWindow {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, raw_ptr as isize);
             }
             state.borrow_mut().hwnd = hwnd;
-            build_pin_manage_static(hwnd, font);
+            apply_window_theme(hwnd, !light);
+            build_pin_manage_static(hwnd, &state);
             let win = Rc::new(Self { state });
             win.reload(pins);
             unsafe {
                 let _ = ShowWindow(hwnd, SW_SHOW);
+                let _ = SetForegroundWindow(hwnd);
             }
             return win;
         }
@@ -737,14 +790,15 @@ impl PinManageWindow {
     }
 
     pub fn reload(&self, pins: &[PinInfo]) {
-        let (hwnd, font, old_children, empty_lbl) = {
+        let (hwnd, dpi, dark, font, old_children, empty_lbl) = {
             let mut st = self.state.borrow_mut();
             let c = std::mem::take(&mut st.children);
-            (st.hwnd, st.font, c, st.empty_label)
+            (st.hwnd, st.dpi, !st.light, st.font, c, st.empty_label)
         };
         if hwnd.is_invalid() {
             return;
         }
+        let s = |d: i32| s_px(d, dpi);
         for h in old_children {
             unsafe {
                 let _ = DestroyWindow(h);
@@ -753,31 +807,27 @@ impl PinManageWindow {
         let mut created = Vec::new();
         if !empty_lbl.is_invalid() {
             unsafe {
-                let _ = ShowWindow(
-                    empty_lbl,
-                    if pins.is_empty() {
-                        SW_SHOW
-                    } else {
-                        windows::Win32::UI::WindowsAndMessaging::SW_HIDE
-                    },
-                );
+                let _ = ShowWindow(empty_lbl, if pins.is_empty() { SW_SHOW } else { SW_HIDE });
             }
         }
         let btn_cls = to_wide_null("BUTTON");
         let lbl_cls = to_wide_null("STATIC");
         for (idx, p) in pins.iter().take(7).enumerate() {
-            let y = 16 + (idx as i32) * 38;
-            let txt = to_wide_null(&format!("贴图 {}", p.index));
+            let y = 18 + (idx as i32) * 44;
+            let txt = to_wide_null(&format!(
+                "贴图 {} · {}×{} ({}%)",
+                p.index, p.width, p.height, p.scale_pct
+            ));
             unsafe {
                 if let Ok(lbl) = CreateWindowExW(
                     Default::default(),
                     PCWSTR(lbl_cls.as_ptr()),
                     PCWSTR(txt.as_ptr()),
                     WS_CHILD | WS_VISIBLE,
-                    16,
-                    y + 4,
-                    90,
-                    24,
+                    s(18),
+                    s(y + 5),
+                    s(200),
+                    s(24),
                     Some(hwnd),
                     None,
                     Some(hinstance()),
@@ -794,10 +844,10 @@ impl PinManageWindow {
                         PCWSTR(btn_cls.as_ptr()),
                         PCWSTR(wt.as_ptr()),
                         WS_CHILD | WS_VISIBLE,
-                        x,
-                        y,
-                        w,
-                        28,
+                        s(x),
+                        s(y),
+                        s(w),
+                        s(30),
                         Some(hwnd),
                         Some(HMENU(cmd_id as *mut _)),
                         Some(hinstance()),
@@ -805,22 +855,52 @@ impl PinManageWindow {
                     )
                     .ok()
                 };
-                if let Some(b1) = mk_btn("定位", 120, 68, 1000 + p.index) {
+                if let Some(b1) = mk_btn("定位", 224, 68, 1000 + p.index) {
                     set_control_font(b1, font);
+                    apply_control_theme(b1, dark);
                     created.push(b1);
                 }
                 let t_label = if p.is_click_through { "穿透关" } else { "穿透开" };
-                if let Some(b2) = mk_btn(t_label, 196, 86, 2000 + p.index) {
+                if let Some(b2) = mk_btn(t_label, 300, 86, 2000 + p.index) {
                     set_control_font(b2, font);
+                    apply_control_theme(b2, dark);
                     created.push(b2);
                 }
-                if let Some(b3) = mk_btn("关闭", 290, 68, 3000 + p.index) {
+                if let Some(b3) = mk_btn("关闭", 394, 68, 3000 + p.index) {
                     set_control_font(b3, font);
+                    apply_control_theme(b3, dark);
                     created.push(b3);
                 }
             }
         }
         self.state.borrow_mut().children = created;
+        invalidate_all(hwnd);
+    }
+
+    pub fn apply_theme(&self, theme: ThemeKind) {
+        let light = theme == ThemeKind::Light;
+        let (hwnd, ctrls, statics) = {
+            let mut st = self.state.borrow_mut();
+            st.light = light;
+            if !st.bg_brush.is_invalid() {
+                unsafe {
+                    let _ = DeleteObject(st.bg_brush.into());
+                }
+            }
+            st.bg_brush = unsafe {
+                CreateSolidBrush(if light {
+                    COLORREF(0x00F6_F6F6)
+                } else {
+                    COLORREF(0x0024_2424)
+                })
+            };
+            (st.hwnd, st.children.clone(), st.static_buttons.clone())
+        };
+        apply_window_theme(hwnd, !light);
+        for c in ctrls.into_iter().chain(statics) {
+            apply_control_theme(c, !light);
+        }
+        invalidate_all(hwnd);
     }
 
     pub fn close(&self) {
@@ -833,64 +913,71 @@ impl PinManageWindow {
     }
 }
 
-fn build_pin_manage_static(hwnd: HWND, font: windows::Win32::Graphics::Gdi::HFONT) {
+fn build_pin_manage_static(hwnd: HWND, state: &Rc<RefCell<PinManageState>>) {
+    let (dpi, dark, font) = {
+        let st = state.borrow();
+        (st.dpi, !st.light, st.font)
+    };
+    let s = |d: i32| s_px(d, dpi);
     let btn_cls = to_wide_null("BUTTON");
     let lbl_cls = to_wide_null("STATIC");
+    let mut static_btns = Vec::new();
     unsafe {
         if let Ok(empty) = CreateWindowExW(
             Default::default(),
             PCWSTR(lbl_cls.as_ptr()),
             PCWSTR(to_wide_null("当前没有贴图。").as_ptr()),
             WS_CHILD | WS_VISIBLE,
-            16,
-            24,
-            240,
-            24,
+            s(18),
+            s(24),
+            s(260),
+            s(24),
             Some(hwnd),
             None,
             Some(hinstance()),
             None,
         ) {
             set_control_font(empty, font);
-            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-            if ptr != 0 {
-                let st = &*(ptr as *const RefCell<PinManageState>);
-                st.borrow_mut().empty_label = empty;
-            }
+            state.borrow_mut().empty_label = empty;
         }
         if let Ok(b_all) = CreateWindowExW(
             Default::default(),
             PCWSTR(btn_cls.as_ptr()),
             PCWSTR(to_wide_null("全部关闭").as_ptr()),
             WS_CHILD | WS_VISIBLE,
-            16,
-            298,
-            100,
-            30,
+            s(18),
+            s(350),
+            s(104),
+            s(30),
             Some(hwnd),
             Some(HMENU(9001 as *mut _)),
             Some(hinstance()),
             None,
         ) {
             set_control_font(b_all, font);
+            apply_control_theme(b_all, dark);
+            static_btns.push(b_all);
         }
         if let Ok(b_close) = CreateWindowExW(
             Default::default(),
             PCWSTR(btn_cls.as_ptr()),
             PCWSTR(to_wide_null("关闭窗口").as_ptr()),
             WS_CHILD | WS_VISIBLE,
-            292,
-            298,
-            100,
-            30,
+            s(358),
+            s(350),
+            s(104),
+            s(30),
             Some(hwnd),
             Some(HMENU(9002 as *mut _)),
             Some(hinstance()),
             None,
         ) {
             set_control_font(b_close, font);
+            apply_control_theme(b_close, dark);
+            static_btns.push(b_close);
         }
     }
+    state.borrow_mut().static_buttons = static_btns;
 }
 
 unsafe extern "system" fn pin_manage_proc(
@@ -905,9 +992,14 @@ unsafe extern "system" fn pin_manage_proc(
             unsafe {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                 let rc = Rc::from_raw(raw as *const RefCell<PinManageState>);
-                let font = rc.borrow().font;
-                if !font.is_invalid() {
-                    let _ = windows::Win32::Graphics::Gdi::DeleteObject(font.into());
+                {
+                    let st = rc.borrow();
+                    if !st.bg_brush.is_invalid() {
+                        let _ = DeleteObject(st.bg_brush.into());
+                    }
+                    if !st.font.is_invalid() {
+                        let _ = DeleteObject(st.font.into());
+                    }
                 }
                 drop(rc);
             }
@@ -921,6 +1013,39 @@ unsafe extern "system" fn pin_manage_proc(
     let st_ref = unsafe { &*(ptr as *const RefCell<PinManageState>) };
 
     match msg {
+        WM_ERASEBKGND => {
+            let hdc = HDC(wparam.0 as *mut _);
+            let st = st_ref.borrow();
+            let mut rc = RECT::default();
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rc);
+                FillRect(hdc, &rc, st.bg_brush);
+            }
+            LRESULT(1)
+        }
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+            let hdc = HDC(wparam.0 as *mut _);
+            let st = st_ref.borrow();
+            let (fg, bg) = if st.light {
+                (COLORREF(0x0017_1717), COLORREF(0x00F6_F6F6))
+            } else {
+                (COLORREF(0x00F5_F5F5), COLORREF(0x0024_2424))
+            };
+            unsafe {
+                SetTextColor(hdc, fg);
+                SetBkColor(hdc, bg);
+            }
+            LRESULT(st.bg_brush.0 as isize)
+        }
+        WM_KEYDOWN => {
+            if wparam.0 as u16 == VK_ESCAPE.0 {
+                unsafe {
+                    let _ = DestroyWindow(hwnd);
+                }
+                return LRESULT(0);
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
         WM_COMMAND => {
             let id = wparam.0 & 0xFFFF;
             let controller = st_ref.borrow().controller;

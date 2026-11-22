@@ -104,15 +104,48 @@ impl NetSpeedTrayWidget {
         hwnd
     }
 
+    pub fn desired_width_px(&self, tray: HWND) -> i32 {
+        let st = self.inner.borrow();
+        let ref_hwnd = if !tray.is_invalid() { tray } else { st.hwnd };
+        let scale = (TaskbarEmbed::dpi_for(ref_hwnd).max(96) as f64) / 96.0;
+        let single_line_both =
+            !st.appearance.two_line && st.appearance.show_download && st.appearance.show_upload;
+        let mut dip = if single_line_both { 196.0 } else { 148.0 };
+        if st.appearance.font_size_dip > 14.0 {
+            dip += (st.appearance.font_size_dip - 14.0) * 8.0;
+        }
+        (dip * scale).round().clamp(112.0, 320.0) as i32
+    }
+
     pub fn apply_appearance(&self, settings: &NetSpeedSettings) {
         let mut s = settings.clone();
         s.normalize();
-        let should_push = {
+        let (should_push, tray_to_redock, hwnd) = {
             let mut st = self.inner.borrow_mut();
             st.appearance = s;
             st.last_frame_key.clear();
-            st.visible && !st.hwnd.is_invalid()
+            let t = if st.embed_requested && st.visible && !st.hwnd.is_invalid() {
+                Some(if st.target_tray.is_invalid() {
+                    TaskbarEmbed::find_primary_tray()
+                } else {
+                    st.target_tray
+                })
+            } else {
+                None
+            };
+            (st.visible && !st.hwnd.is_invalid(), t, st.hwnd)
         };
+        if let Some(tray) = tray_to_redock
+            && !tray.is_invalid()
+        {
+            let desired = self.desired_width_px(tray);
+            let cur_w = TaskbarEmbed::try_get_window_rect(hwnd)
+                .map(|r| r.width())
+                .unwrap_or(0);
+            if (cur_w - desired).abs() >= 8 {
+                let _ = TaskbarEmbed::try_dock_in_tray_slot(hwnd, tray, desired);
+            }
+        }
         if should_push {
             self.push_frame();
         }
@@ -168,11 +201,12 @@ impl NetSpeedTrayWidget {
             }
         };
 
+        let desired = self.desired_width_px(tray);
         let _ = TaskbarEmbed::cleanup_orphan_netspeed_windows(Some(std::process::id()));
         unsafe {
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
-        TaskbarEmbed::try_dock_in_tray_slot(hwnd, tray, TaskbarEmbed::DEFAULT_WIDGET_WIDTH_PX)?;
+        TaskbarEmbed::try_dock_in_tray_slot(hwnd, tray, desired)?;
         self.push_frame();
         unsafe {
             let _ = SetTimer(Some(hwnd), TIMER_HEARTBEAT, 2000, None);
@@ -302,17 +336,27 @@ unsafe extern "system" fn tray_wnd_proc(
 
     match msg {
         WM_TIMER if wparam.0 == TIMER_HEARTBEAT => {
-            let (embed_req, tray, controller) = {
+            let (embed_req, tray, controller, desired_w) = {
                 let st = inner.borrow();
                 let t = if st.target_tray.is_invalid() {
                     TaskbarEmbed::find_primary_tray()
                 } else {
                     st.target_tray
                 };
-                (st.embed_requested, t, st.controller)
+                let ref_hwnd = if !t.is_invalid() { t } else { hwnd };
+                let scale = (TaskbarEmbed::dpi_for(ref_hwnd).max(96) as f64) / 96.0;
+                let single_both = !st.appearance.two_line
+                    && st.appearance.show_download
+                    && st.appearance.show_upload;
+                let mut dip = if single_both { 196.0 } else { 148.0 };
+                if st.appearance.font_size_dip > 14.0 {
+                    dip += (st.appearance.font_size_dip - 14.0) * 8.0;
+                }
+                let dw = (dip * scale).round().clamp(112.0, 320.0) as i32;
+                (st.embed_requested, t, st.controller, dw)
             };
-            if embed_req && !TaskbarEmbed::is_in_tray_slot(hwnd, tray, TaskbarEmbed::DEFAULT_WIDGET_WIDTH_PX, 4)
-                && TaskbarEmbed::try_dock_in_tray_slot(hwnd, tray, TaskbarEmbed::DEFAULT_WIDGET_WIDTH_PX).is_ok() {
+            if embed_req && !TaskbarEmbed::is_in_tray_slot(hwnd, tray, desired_w, 4)
+                && TaskbarEmbed::try_dock_in_tray_slot(hwnd, tray, desired_w).is_ok() {
                     inner.borrow_mut().last_frame_key.clear();
                     // Push frame on re-dock
                     let (d2d, app, theme, down, up, miss) = {

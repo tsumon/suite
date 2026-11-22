@@ -356,6 +356,12 @@ fn sync_theme_core(core: &ControllerCore, explicit: Option<ThemeKind>) {
     if let Some(ref sw) = *core.settings_win.borrow() {
         sw.apply_theme(theme);
     }
+    if let Some(ref hw) = *core.history_win.borrow() {
+        hw.apply_theme(theme);
+    }
+    if let Some(ref pm) = *core.pin_manage_win.borrow() {
+        pm.apply_theme(theme);
+    }
 }
 
 impl AppController {
@@ -632,12 +638,15 @@ fn open_settings_core(core: &ControllerCore) {
     let adapters = core.sampler.list_adapters().unwrap_or_default();
     let last_label = core.last_start_label.borrow().clone();
     let existing = core.settings_win.borrow().clone();
+    let mon_count = MonitorEnumerator::get_all().len();
     let win = SettingsWindow::show_or_focus(
         existing.as_deref(),
         core.hwnd.get(),
+        Rc::clone(&core.d2d),
         &settings,
         &adapters,
         &last_label,
+        mon_count,
     );
     win.apply_theme(current_theme());
     if let Some(ref conflict) = *core.hotkey_conflict_msg.borrow() {
@@ -798,6 +807,7 @@ fn handle_command(core: &Rc<ControllerCore>, cmd: AppCommand, lparam: LPARAM) {
             let settings = core.store.borrow().current().clone();
             let existing = core.history_win.borrow().clone();
             let win = HistoryWindow::show_or_focus(existing.as_deref(), core.hwnd.get(), &settings);
+            win.apply_theme(current_theme());
             *core.history_win.borrow_mut() = Some(win);
         }
         AppCommand::PinFromClipboard => {
@@ -811,6 +821,7 @@ fn handle_command(core: &Rc<ControllerCore>, cmd: AppCommand, lparam: LPARAM) {
             let list = core.pins.borrow_mut().list();
             let existing = core.pin_manage_win.borrow().clone();
             let win = PinManageWindow::show_or_focus(existing.as_deref(), core.hwnd.get(), &list);
+            win.apply_theme(current_theme());
             *core.pin_manage_win.borrow_mut() = Some(win);
         }
         AppCommand::ClearClickThrough => {
@@ -1265,7 +1276,12 @@ unsafe extern "system" fn controller_wnd_proc(
             }
             LRESULT(0)
         }
-        WM_APP_SCROLL_PROGRESS => LRESULT(0),
+        WM_APP_SCROLL_PROGRESS => {
+            if let Some(ref sess) = *core.scroll_session.borrow() {
+                sess.update_progress(wparam.0 as i32);
+            }
+            LRESULT(0)
+        }
         WM_APP_SCROLL_DONE => {
             *core.scroll_session.borrow_mut() = None;
             if let Some(res) = unsafe { take_boxed::<suite_capture::ScrollCaptureResult>(lparam) } {
@@ -1305,7 +1321,12 @@ unsafe extern "system" fn controller_wnd_proc(
                     res.ok, res.channel_zh, res.version, res.html_url
                 ));
                 if let Some(ref sw) = *core.settings_win.borrow() {
-                    sw.set_status(&res.message);
+                    let dl = if res.has_update {
+                        res.html_url.as_deref()
+                    } else {
+                        None
+                    };
+                    sw.set_update_result(&res.message, dl);
                 } else if res.has_update {
                     core.tray.borrow().balloon("Suite 发现新版本", &res.message);
                 }

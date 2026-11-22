@@ -13,17 +13,18 @@ use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreatePen, CreateSolidBrush,
-    DeleteDC, DeleteObject, EndPaint, FillRect, GetStockObject, HOLLOW_BRUSH, LineTo, MoveToEx,
-    PAINTSTRUCT, PS_SOLID, Rectangle, SRCCOPY, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
-    TextOutW,
+    DeleteDC, DeleteObject, EndPaint, FillRect, GetStockObject, HBRUSH, HOLLOW_BRUSH, LineTo,
+    MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, SRCCOPY, SelectObject, SetBkColor, SetBkMode,
+    SetTextColor, TRANSPARENT, TextOutW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetWindowLongPtrW, GWLP_USERDATA,
     HWND_TOPMOST, IDC_CROSS, LoadCursorW, SW_SHOW, SW_SHOWNOACTIVATE, SetForegroundWindow,
-    SetWindowLongPtrW, ShowWindow, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_NCDESTROY, WM_PAINT, WM_RBUTTONUP, WS_CHILD, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_VISIBLE,
+    SetWindowLongPtrW, SetWindowTextW, ShowWindow, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC,
+    WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY,
+    WM_PAINT, WM_RBUTTONUP, WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_VISIBLE,
 };
 use windows::core::PCWSTR;
 
@@ -32,7 +33,10 @@ use crate::d2d::D2dRenderer;
 use crate::messages::{
     ScrollPickMsg, WM_APP_SCROLL_DONE, WM_APP_SCROLL_PICKED, WM_APP_SCROLL_PROGRESS, post_boxed,
 };
-use crate::win32_util::{create_ui_font, hinstance, invalidate_all, register_window_class, set_control_font};
+use crate::win32_util::{
+    apply_window_theme, create_ui_font, dpi_for_cursor, hinstance, invalidate_all,
+    register_window_class, s_px, set_control_font,
+};
 
 const SCROLL_PICK_CLASS: &str = "SuiteScrollPickOverlayWnd";
 const SCROLL_BORDER_CLASS: &str = "SuiteScrollBorderWnd";
@@ -59,6 +63,7 @@ pub struct ScrollCaptureSession {
     picker_shared: Option<Rc<RefCell<SharedScrollPick>>>,
     border_hwnd: HWND,
     pill_hwnd: HWND,
+    pill_label: HWND,
     cancel_flag: Arc<AtomicBool>,
     finish_flag: Arc<AtomicBool>,
     pill_font: windows::Win32::Graphics::Gdi::HFONT,
@@ -150,6 +155,7 @@ impl ScrollCaptureSession {
             picker_shared: Some(shared),
             border_hwnd: HWND::default(),
             pill_hwnd: HWND::default(),
+            pill_label: HWND::default(),
             cancel_flag: Arc::new(AtomicBool::new(false)),
             finish_flag: Arc::new(AtomicBool::new(false)),
             pill_font: Default::default(),
@@ -210,16 +216,20 @@ impl ScrollCaptureSession {
         }
         self.border_hwnd = border;
 
-        // Floating pill below/above rect with "完成" & "取消" buttons.
-        let pill_w = 430;
-        let pill_h = 36;
+        // Floating dark pill below/above rect with live progress, "完成" & "取消" buttons.
+        let dpi = dpi_for_cursor();
+        let s = |d: i32| s_px(d, dpi);
+        let pill_w = s(460);
+        let pill_h = s(38);
         let pill_x = rect.x.max(8);
         let pill_y = (rect.bottom() + 8).min(980);
         let pcls = to_wide_null(SCROLL_PILL_CLASS);
         let ptitle = to_wide_null("Suite ScrollStatus");
+        let bg_brush = unsafe { CreateSolidBrush(COLORREF(0x001F_1F1F)) };
         let pill_state = Box::into_raw(Box::new((
             Arc::clone(&self.finish_flag),
             Arc::clone(&self.cancel_flag),
+            bg_brush,
         )));
         let pill = unsafe {
             CreateWindowExW(
@@ -238,13 +248,15 @@ impl ScrollCaptureSession {
             )
             .unwrap_or_default()
         };
-        let font = create_ui_font(13, false, false, "Microsoft YaHei UI");
+        let font = create_ui_font(s(13), false, false, "Microsoft YaHei UI");
         self.pill_font = font;
         if pill.is_invalid() {
             unsafe {
+                let _ = DeleteObject(bg_brush.into());
                 drop(Box::from_raw(pill_state));
             }
         } else {
+            apply_window_theme(pill, true);
             unsafe {
                 SetWindowLongPtrW(pill, GWLP_USERDATA, pill_state as isize);
                 let _ = ShowWindow(pill, SW_SHOWNOACTIVATE);
@@ -253,10 +265,10 @@ impl ScrollCaptureSession {
                     PCWSTR(to_wide_null("STATIC").as_ptr()),
                     PCWSTR(to_wide_null(ScrollCapture::SCROLL_HINT).as_ptr()),
                     WS_CHILD | WS_VISIBLE,
-                    10,
-                    9,
-                    290,
-                    20,
+                    s(12),
+                    s(10),
+                    s(316),
+                    s(20),
                     Some(pill),
                     None,
                     Some(hinstance()),
@@ -264,15 +276,16 @@ impl ScrollCaptureSession {
                 )
                 .unwrap_or_default();
                 set_control_font(lbl, font);
+                self.pill_label = lbl;
                 let b_done = CreateWindowExW(
                     Default::default(),
                     PCWSTR(to_wide_null("BUTTON").as_ptr()),
                     PCWSTR(to_wide_null("完成").as_ptr()),
                     WS_CHILD | WS_VISIBLE,
-                    306,
-                    5,
-                    54,
-                    26,
+                    s(334),
+                    s(6),
+                    s(56),
+                    s(26),
                     Some(pill),
                     Some(windows::Win32::UI::WindowsAndMessaging::HMENU(std::ptr::dangling_mut())),
                     Some(hinstance()),
@@ -285,10 +298,10 @@ impl ScrollCaptureSession {
                     PCWSTR(to_wide_null("BUTTON").as_ptr()),
                     PCWSTR(to_wide_null("取消").as_ptr()),
                     WS_CHILD | WS_VISIBLE,
-                    366,
-                    5,
-                    54,
-                    26,
+                    s(396),
+                    s(6),
+                    s(56),
+                    s(26),
                     Some(pill),
                     Some(windows::Win32::UI::WindowsAndMessaging::HMENU(2 as *mut _)),
                     Some(hinstance()),
@@ -326,6 +339,15 @@ impl ScrollCaptureSession {
             });
     }
 
+    pub fn update_progress(&self, height_px: i32) {
+        if !self.pill_label.is_invalid() {
+            let txt = to_wide_null(&format!("已拼接 {height_px} px · 停滚 1.5 秒自动完成"));
+            unsafe {
+                let _ = SetWindowTextW(self.pill_label, PCWSTR(txt.as_ptr()));
+            }
+        }
+    }
+
     pub fn cancel(&mut self) {
         self.cancel_flag.store(true, Ordering::Relaxed);
         if let Some(shared) = self.picker_shared.take() {
@@ -342,6 +364,7 @@ impl ScrollCaptureSession {
                 let _ = DestroyWindow(self.pill_hwnd);
             }
             self.pill_hwnd = HWND::default();
+            self.pill_label = HWND::default();
         }
         if !self.pill_font.is_invalid() {
             unsafe {
@@ -604,32 +627,53 @@ unsafe extern "system" fn pill_proc(
         if raw != 0 {
             unsafe {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-                drop(Box::from_raw(raw as *mut (Arc<AtomicBool>, Arc<AtomicBool>)));
+                let boxed = Box::from_raw(raw as *mut (Arc<AtomicBool>, Arc<AtomicBool>, HBRUSH));
+                if !boxed.2.is_invalid() {
+                    let _ = DeleteObject(boxed.2.into());
+                }
+                drop(boxed);
             }
         }
         return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
     }
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
     if ptr != 0 {
-        let flags = unsafe { &*(ptr as *const (Arc<AtomicBool>, Arc<AtomicBool>)) };
+        let state = unsafe { &*(ptr as *const (Arc<AtomicBool>, Arc<AtomicBool>, HBRUSH)) };
         match msg {
+            WM_ERASEBKGND => {
+                let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
+                let mut rc = RECT::default();
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rc);
+                    FillRect(hdc, &rc, state.2);
+                }
+                return LRESULT(1);
+            }
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+                let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
+                unsafe {
+                    SetTextColor(hdc, COLORREF(0x00F5_F5F5));
+                    SetBkColor(hdc, COLORREF(0x001F_1F1F));
+                }
+                return LRESULT(state.2.0 as isize);
+            }
             windows::Win32::UI::WindowsAndMessaging::WM_COMMAND => {
                 let id = wparam.0 & 0xFFFF;
                 if id == 1 {
-                    flags.0.store(true, Ordering::Relaxed);
+                    state.0.store(true, Ordering::Relaxed);
                 } else if id == 2 {
-                    flags.1.store(true, Ordering::Relaxed);
+                    state.1.store(true, Ordering::Relaxed);
                 }
                 return LRESULT(0);
             }
             WM_KEYDOWN => {
                 let vk = wparam.0 as u16;
                 if vk == VK_RETURN.0 {
-                    flags.0.store(true, Ordering::Relaxed);
+                    state.0.store(true, Ordering::Relaxed);
                     return LRESULT(0);
                 }
                 if vk == VK_ESCAPE.0 {
-                    flags.1.store(true, Ordering::Relaxed);
+                    state.1.store(true, Ordering::Relaxed);
                     return LRESULT(0);
                 }
             }

@@ -33,7 +33,10 @@ use windows::core::PCWSTR;
 
 use crate::color_pick_ui::draw_magnifier_box;
 use crate::d2d::D2dRenderer;
-use crate::messages::{CaptureDoneMsg, OcrDoneMsg, WM_APP_CAPTURE_DONE, WM_APP_OCR_DONE, post_boxed};
+use crate::messages::{
+    CaptureDoneMsg, ColorPickDoneMsg, OcrDoneMsg, WM_APP_CAPTURE_DONE, WM_APP_COLOR_PICK_DONE,
+    WM_APP_OCR_DONE, post_boxed,
+};
 use crate::win32_util::{
     create_ui_font, hinstance, invalidate_all, register_window_class, save_png_dialog,
     set_control_font,
@@ -1057,6 +1060,7 @@ unsafe extern "system" fn capture_wnd_proc(
             let vk = wparam.0 as u16;
             let shared = Rc::clone(&mon_rc.borrow().shared);
             let ctrl = unsafe { GetKeyState(i32::from(VK_CONTROL.0)) } < 0;
+            let shift = unsafe { GetKeyState(i32::from(VK_SHIFT.0)) } < 0;
             if vk == VK_ESCAPE.0 {
                 let had_text = !shared.borrow().text_edit.is_invalid();
                 if had_text {
@@ -1096,13 +1100,105 @@ unsafe extern "system" fn capture_wnd_proc(
                 }
                 return LRESULT(0);
             }
-            if ctrl && vk == b'Z' as u16 {
-                trigger_toolbar_action(&shared, hwnd, AnnotateTool::Undo);
-                return LRESULT(0);
-            }
-            if ctrl && vk == b'Y' as u16 {
-                trigger_toolbar_action(&shared, hwnd, AnnotateTool::Redo);
-                return LRESULT(0);
+            let (phase, no_text_edit) = {
+                let s = shared.borrow();
+                (s.phase, s.text_edit.is_invalid())
+            };
+            if no_text_edit {
+                if phase == OverlayPhase::Select && !ctrl && vk == b'C' as u16 {
+                    let (vx, vy) = MonitorEnumerator::cursor_pos();
+                    let sampled = {
+                        let s = shared.borrow();
+                        s.frames.iter().find_map(|f| {
+                            let b = f.monitor.bounds;
+                            if !b.contains(vx, vy) {
+                                return None;
+                            }
+                            let px = ((vx - b.x) as f64 * f.buffer.width as f64
+                                / b.width.max(1) as f64)
+                                .round() as i32;
+                            let py = ((vy - b.y) as f64 * f.buffer.height as f64
+                                / b.height.max(1) as f64)
+                                .round() as i32;
+                            f.buffer
+                                .try_get_pixel(px, py)
+                                .map(|(blue, green, red, _)| (red, green, blue))
+                        })
+                    };
+                    if let Some((r, g, b)) = sampled {
+                        let val = ColorPick::to_hex(r, g, b);
+                        let controller = shared.borrow().controller;
+                        let copied = ImageClipboard::copy_text(&val);
+                        finish_capture_session(
+                            &shared,
+                            CaptureDoneMsg {
+                                cancelled: true,
+                                pin_requested: false,
+                                save_requested: false,
+                                image: None,
+                                selection: PixelRect::default(),
+                                dpi_x: 96,
+                                dpi_y: 96,
+                                error: None,
+                            },
+                        );
+                        post_boxed(
+                            controller,
+                            WM_APP_COLOR_PICK_DONE,
+                            0,
+                            ColorPickDoneMsg {
+                                copied_value: copied.is_ok().then_some(val),
+                                error: copied.err(),
+                            },
+                        );
+                        return LRESULT(0);
+                    }
+                }
+                if phase == OverlayPhase::Annotate {
+                    if ctrl && shift && vk == b'Z' as u16 {
+                        trigger_toolbar_action(&shared, hwnd, AnnotateTool::Redo);
+                        return LRESULT(0);
+                    }
+                    if ctrl && vk == b'Z' as u16 {
+                        trigger_toolbar_action(&shared, hwnd, AnnotateTool::Undo);
+                        return LRESULT(0);
+                    }
+                    if ctrl && vk == b'Y' as u16 {
+                        trigger_toolbar_action(&shared, hwnd, AnnotateTool::Redo);
+                        return LRESULT(0);
+                    }
+                    if ctrl && vk == b'C' as u16 {
+                        commit_and_finish(&shared, false, false);
+                        return LRESULT(0);
+                    }
+                    if ctrl && vk == b'S' as u16 {
+                        trigger_toolbar_action(&shared, hwnd, AnnotateTool::Save);
+                        return LRESULT(0);
+                    }
+                    if ctrl && vk == b'T' as u16 {
+                        commit_and_finish(&shared, true, false);
+                        return LRESULT(0);
+                    }
+                    if ctrl && vk == b'O' as u16 {
+                        trigger_toolbar_action(&shared, hwnd, AnnotateTool::Ocr);
+                        return LRESULT(0);
+                    }
+                    if !ctrl {
+                        let shortcut_tool = match vk {
+                            0x31 => Some(AnnotateTool::Shape),
+                            0x32 => Some(AnnotateTool::Curve),
+                            0x33 => Some(AnnotateTool::Pencil),
+                            0x34 => Some(AnnotateTool::Marker),
+                            0x35 => Some(AnnotateTool::Mosaic),
+                            0x36 => Some(AnnotateTool::Text),
+                            _ => None,
+                        };
+                        if let Some(t) = shortcut_tool {
+                            trigger_toolbar_action(&shared, hwnd, t);
+                            return LRESULT(0);
+                        }
+                    }
+                }
             }
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
