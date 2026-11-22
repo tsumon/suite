@@ -183,6 +183,46 @@ impl PixelBuffer {
         }
         out
     }
+
+    /// Returns a copy rotated 90 degrees clockwise.
+    pub fn rotate_90_cw(&self) -> Self {
+        if self.width <= 0 || self.height <= 0 || self.bgra.is_empty() {
+            return self.clone();
+        }
+        let new_w = self.height;
+        let new_h = self.width;
+        let mut out = Self::allocate(new_w, new_h);
+        for y in 0..self.height {
+            let src_row = (y * self.stride) as usize;
+            let dx = self.height - 1 - y;
+            for x in 0..self.width {
+                let si = src_row + (x * 4) as usize;
+                let dy = x;
+                let di = (dy * out.stride + dx * 4) as usize;
+                out.bgra[di..di + 4].copy_from_slice(&self.bgra[si..si + 4]);
+            }
+        }
+        out
+    }
+
+    /// Returns a horizontally mirrored copy.
+    pub fn flip_horizontal(&self) -> Self {
+        if self.width <= 0 || self.height <= 0 || self.bgra.is_empty() {
+            return self.clone();
+        }
+        let mut out = Self::allocate(self.width, self.height);
+        for y in 0..self.height {
+            let src_row = (y * self.stride) as usize;
+            let dst_row = (y * out.stride) as usize;
+            for x in 0..self.width {
+                let dx = self.width - 1 - x;
+                let si = src_row + (x * 4) as usize;
+                let di = dst_row + (dx * 4) as usize;
+                out.bgra[di..di + 4].copy_from_slice(&self.bgra[si..si + 4]);
+            }
+        }
+        out
+    }
 }
 
 pub struct RegionCropper;
@@ -535,5 +575,30 @@ mod tests {
             CaptureUx::hit_test_resize_handle(sel, 150, 150, 10),
             ResizeHandle::None
         );
+    }
+
+    #[test]
+    fn rotate_90_cw_and_flip_horizontal_preserve_exact_pixels() {
+        let mut buf = PixelBuffer::allocate(3, 2);
+        // Set (0,0)=R, (2,0)=G, (0,1)=B
+        let set = |b: &mut PixelBuffer, x: i32, y: i32, rgba: [u8; 4]| {
+            let i = (y * b.stride + x * 4) as usize;
+            b.bgra[i..i + 4].copy_from_slice(&rgba);
+        };
+        set(&mut buf, 0, 0, [0, 0, 255, 255]);
+        set(&mut buf, 2, 0, [0, 255, 0, 255]);
+        set(&mut buf, 0, 1, [255, 0, 0, 255]);
+
+        let rot = buf.rotate_90_cw();
+        assert_eq!((rot.width, rot.height), (2, 3));
+        assert_eq!(rot.try_get_pixel(1, 0), Some((0, 0, 255, 255)));
+        assert_eq!(rot.try_get_pixel(1, 2), Some((0, 255, 0, 255)));
+        assert_eq!(rot.try_get_pixel(0, 0), Some((255, 0, 0, 255)));
+
+        let flipped = buf.flip_horizontal();
+        assert_eq!((flipped.width, flipped.height), (3, 2));
+        assert_eq!(flipped.try_get_pixel(2, 0), Some((0, 0, 255, 255)));
+        assert_eq!(flipped.try_get_pixel(0, 0), Some((0, 255, 0, 255)));
+        assert_eq!(flipped.try_get_pixel(2, 1), Some((255, 0, 0, 255)));
     }
 }

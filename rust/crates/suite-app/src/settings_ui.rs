@@ -80,6 +80,7 @@ const ID_BTN_QUICK_CAPTURE: usize = 303;
 const ID_BTN_QUICK_PICK: usize = 304;
 const ID_BTN_QUICK_SCROLL: usize = 305;
 const ID_BTN_QUICK_PINS: usize = 306;
+const ID_BTN_QUICK_DELAYED: usize = 307;
 
 // Page 1: Capture & Hotkeys
 const ID_CHK_CTRL: usize = 401;
@@ -943,15 +944,16 @@ fn build_settings_controls(hwnd: HWND, state: &Rc<RefCell<SettingsState>>) {
     let mut p0 = Vec::new();
     let chk_run = mk_chk("开机启动（写入当前用户 Run 注册表）", px, 86, 360, ID_CHK_RUN_STARTUP);
     let b_theme = mk_btn("切换系统深浅色 (Apps + System)", px, 118, 256, 30, ID_BTN_TOGGLE_THEME);
-    let b_qc = mk_btn("区域截图", px, 198, 92, 28, ID_BTN_QUICK_CAPTURE);
-    let b_qp = mk_btn("取色", px + 100, 198, 76, 28, ID_BTN_QUICK_PICK);
-    let b_qs = mk_btn("滚动截图", px + 184, 198, 92, 28, ID_BTN_QUICK_SCROLL);
-    let b_qpins = mk_btn("贴图管理", px + 284, 198, 92, 28, ID_BTN_QUICK_PINS);
-    let b_qhist = mk_btn("截图历史", px + 384, 198, 92, 28, ID_BTN_OPEN_HISTORY);
+    let b_qc = mk_btn("区域截图", px, 198, 78, 28, ID_BTN_QUICK_CAPTURE);
+    let b_qdelay = mk_btn("延时3秒", px + 84, 198, 76, 28, ID_BTN_QUICK_DELAYED);
+    let b_qp = mk_btn("取色", px + 166, 198, 56, 28, ID_BTN_QUICK_PICK);
+    let b_qs = mk_btn("滚动截图", px + 228, 198, 78, 28, ID_BTN_QUICK_SCROLL);
+    let b_qpins = mk_btn("贴图管理", px + 312, 198, 78, 28, ID_BTN_QUICK_PINS);
+    let b_qhist = mk_btn("截图历史", px + 396, 198, 78, 28, ID_BTN_OPEN_HISTORY);
     let lbl_sum = mk_lbl("", px, 278, 504, 72);
     let lbl_g_help = mk_help("所有设置即时应用并自动保存至 settings.json。", px, 362, 480, 22);
     p0.extend([
-        chk_run, b_theme, b_qc, b_qp, b_qs, b_qpins, b_qhist, lbl_sum, lbl_g_help,
+        chk_run, b_theme, b_qc, b_qdelay, b_qp, b_qs, b_qpins, b_qhist, lbl_sum, lbl_g_help,
     ]);
 
     // ------------------------------------------------------------------
@@ -2237,6 +2239,7 @@ unsafe extern "system" fn settings_wnd_proc(
                 }
                 ID_BTN_TOGGLE_THEME => post_command(controller, AppCommand::ToggleTheme, 0),
                 ID_BTN_QUICK_CAPTURE => post_command(controller, AppCommand::Capture, 0),
+                ID_BTN_QUICK_DELAYED => post_command(controller, AppCommand::DelayedCapture, 0),
                 ID_BTN_QUICK_PICK => post_command(controller, AppCommand::ColorPick, 0),
                 ID_BTN_QUICK_SCROLL | ID_BTN_START_SCROLL => {
                     post_command(controller, AppCommand::ScrollCapture, 0)

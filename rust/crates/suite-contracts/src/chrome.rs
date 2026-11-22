@@ -58,6 +58,7 @@ pub enum AnnotateTool {
     Pencil,
     Marker,
     Mosaic,
+    Number,
     Text,
     Ocr,
     Pick,
@@ -112,15 +113,17 @@ impl AnnotateToolbar {
     pub const THICKNESS_CHIPS: [i32; 3] = [2, 4, 6];
     pub const MARKER_THICKNESS_CHIPS: [i32; 3] = [10, 14, 20];
     pub const MOSAIC_RADIUS_CHIPS: [i32; 3] = [10, 16, 24];
+    pub const NUMBER_RADIUS_CHIPS: [i32; 3] = [12, 16, 22];
     pub const ERASER_THICKNESS_CHIPS: [i32; 3] = [12, 18, 28];
     pub const TEXT_SIZE_CHIPS: [i32; 3] = [14, 18, 24];
 
-    pub const ORDER: [AnnotateTool; 15] = [
+    pub const ORDER: [AnnotateTool; 16] = [
         AnnotateTool::Shape,
         AnnotateTool::Curve,
         AnnotateTool::Pencil,
         AnnotateTool::Marker,
         AnnotateTool::Mosaic,
+        AnnotateTool::Number,
         AnnotateTool::Text,
         AnnotateTool::Ocr,
         AnnotateTool::Pick,
@@ -140,6 +143,7 @@ impl AnnotateToolbar {
             AnnotateTool::Pencil => "铅笔",
             AnnotateTool::Marker => "马克笔",
             AnnotateTool::Mosaic => "马赛克",
+            AnnotateTool::Number => "步骤序号",
             AnnotateTool::Text => "文字",
             AnnotateTool::Eraser => "橡皮",
             AnnotateTool::Undo => "撤销",
@@ -153,6 +157,27 @@ impl AnnotateToolbar {
         }
     }
 
+    pub fn tooltip_with_shortcut(tool: AnnotateTool) -> &'static str {
+        match tool {
+            AnnotateTool::Shape => "矩形 / 椭圆 (1)",
+            AnnotateTool::Curve => "直线 / 虚线 / 箭头 (2)",
+            AnnotateTool::Pencil => "铅笔 (3)",
+            AnnotateTool::Marker => "马克笔 (4)",
+            AnnotateTool::Mosaic => "马赛克 / 模糊 (5)",
+            AnnotateTool::Number => "步骤序号 (6)",
+            AnnotateTool::Text => "文字 (7)",
+            AnnotateTool::Ocr => "识字 OCR (Ctrl+O)",
+            AnnotateTool::Pick => "取色 (I)",
+            AnnotateTool::Eraser => "橡皮 (E)",
+            AnnotateTool::Undo => "撤销 (Ctrl+Z)",
+            AnnotateTool::Redo => "重做 (Ctrl+Y)",
+            AnnotateTool::Close => "退出截图 (Esc)",
+            AnnotateTool::Pin => "贴图到桌面 (Ctrl+T)",
+            AnnotateTool::Save => "保存图片 (Ctrl+S / Ctrl+Shift+S快存)",
+            AnnotateTool::Copy => "完成并复制 (Enter / Ctrl+C)",
+        }
+    }
+
     pub fn shows_selected_dot(tool: AnnotateTool) -> bool {
         matches!(
             tool,
@@ -161,6 +186,7 @@ impl AnnotateToolbar {
                 | AnnotateTool::Pencil
                 | AnnotateTool::Marker
                 | AnnotateTool::Mosaic
+                | AnnotateTool::Number
                 | AnnotateTool::Text
                 | AnnotateTool::Eraser
         )
@@ -281,6 +307,68 @@ impl AnnotateToolbar {
             }
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn place_tooltip(
+        anchor_cx: f64,
+        anchor_top: f64,
+        anchor_bottom: f64,
+        tip_w: f64,
+        tip_h: f64,
+        prefer_below: bool,
+        avoid_top: f64,
+        avoid_bottom: f64,
+        avoid_active: bool,
+        work_left: f64,
+        work_top: f64,
+        work_right: f64,
+        work_bottom: f64,
+        gap: f64,
+    ) -> (f64, f64) {
+        let min_x = work_left + 4.0;
+        let max_x = (work_right - tip_w - 4.0).max(min_x);
+        let x = (anchor_cx - tip_w / 2.0).clamp(min_x, max_x);
+
+        let min_y = work_top + 2.0;
+        let max_y = (work_bottom - tip_h - 2.0).max(min_y);
+
+        let fits = |top: f64| -> bool {
+            if top < min_y || top > max_y {
+                return false;
+            }
+            if avoid_active && top < avoid_bottom && (top + tip_h) > avoid_top {
+                return false;
+            }
+            true
+        };
+
+        let below = anchor_bottom + gap;
+        let above = anchor_top - gap - tip_h;
+        let order = if prefer_below { [below, above] } else { [above, below] };
+        for candidate in order {
+            if fits(candidate) {
+                return (x, candidate);
+            }
+        }
+
+        if avoid_active {
+            let span_top = anchor_top.min(avoid_top);
+            let span_bottom = anchor_bottom.max(avoid_bottom);
+            let clear_order = if prefer_below {
+                [span_bottom + gap, span_top - gap - tip_h]
+            } else {
+                [span_top - gap - tip_h, span_bottom + gap]
+            };
+            for candidate in clear_order {
+                if candidate >= min_y && candidate <= max_y {
+                    return (x, candidate);
+                }
+            }
+        }
+
+        let fallback = if prefer_below { below } else { above };
+        (x, fallback.clamp(min_y, max_y))
+    }
 }
 
 #[cfg(test)]
@@ -317,5 +405,30 @@ mod tests {
         assert!(p.sub_visible);
         assert!(p.sub_top < p.main_top);
         assert!(p.main_top + 40.0 <= 950.0);
+    }
+
+    #[test]
+    fn tooltip_avoids_subbar_and_clamps_to_screen() {
+        // When subbar sits directly below main bar, tooltip prefers above the main bar
+        let (x, y) = AnnotateToolbar::place_tooltip(
+            10.0, 300.0, 340.0, 140.0, 26.0, false, 344.0, 380.0, true, 0.0, 0.0, 1920.0, 1080.0,
+            6.0,
+        );
+        assert_eq!(x, 4.0);
+        assert_eq!(y, 268.0);
+
+        // Near top edge with prefer_above but no room above and subbar below -> jumps clear below subbar
+        let (_, y2) = AnnotateToolbar::place_tooltip(
+            400.0, 8.0, 48.0, 120.0, 26.0, false, 52.0, 88.0, true, 0.0, 0.0, 1920.0, 1080.0, 6.0,
+        );
+        assert!(y2 >= 88.0 + 6.0);
+    }
+
+    #[test]
+    fn all_toolbar_tools_have_rich_tooltips() {
+        for &tool in &AnnotateToolbar::ORDER {
+            assert!(!AnnotateToolbar::tooltip(tool).is_empty());
+            assert!(!AnnotateToolbar::tooltip_with_shortcut(tool).is_empty());
+        }
     }
 }

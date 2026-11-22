@@ -1,6 +1,6 @@
 ﻿# Suite — Rust Native Build & Release Packaging Script
 $ErrorActionPreference = "Stop"
-$Version = "0.2.0"
+$Version = "0.3.0"
 $Root = Split-Path -Parent $PSScriptRoot
 $RustDir = Join-Path $Root "rust"
 $DistDir = Join-Path $Root "dist-rs"

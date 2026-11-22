@@ -9,16 +9,18 @@ use suite_capture::{
 };
 use suite_contracts::{AnnotateTool, AnnotateToolbar, CurveStyle, StackPlacement};
 use suite_platform::constants::to_wide_null;
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleBitmap,
-    CreateCompatibleDC, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DeleteDC, DeleteObject,
-    Ellipse, EndPaint, FillRect, GetStockObject, HBITMAP, HBRUSH, HDC, HFONT, HOLLOW_BRUSH,
-    LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Polygon, Rectangle, RoundRect, SRCCOPY, SelectObject,
-    SetBkColor, SetBkMode, SetTextColor, StretchDIBits, TRANSPARENT, TextOutW,
+    CreateCompatibleDC, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE,
+    DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, Ellipse, EndPaint, FillRect, GetStockObject,
+    GetTextExtentPoint32W, HBITMAP, HBRUSH, HDC, HFONT, HOLLOW_BRUSH, LineTo, MoveToEx,
+    PAINTSTRUCT, PS_SOLID, Polygon, Rectangle, RoundRect, SRCCOPY, SelectObject, SetBkColor,
+    SetBkMode, SetTextColor, StretchDIBits, TRANSPARENT,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL, VK_ESCAPE, VK_RETURN, VK_SHIFT,
+    GetKeyState, ReleaseCapture, SetCapture, SetFocus, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_LEFT,
+    VK_RETURN, VK_RIGHT, VK_SHIFT, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, ES_AUTOHSCROLL, GetWindowLongPtrW,
@@ -26,8 +28,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     IDC_SIZENS, IDC_SIZENWSE, IDC_SIZEWE, KillTimer, LoadCursorW, SW_HIDE, SW_SHOW, SetCursor,
     SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_COMMAND,
     WM_CTLCOLOREDIT, WM_DESTROY, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_PAINT, WM_RBUTTONUP, WM_TIMER, WS_CHILD,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+    WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_RBUTTONUP, WM_TIMER,
+    WS_CHILD, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
 };
 use windows::core::PCWSTR;
 
@@ -38,7 +40,7 @@ use crate::messages::{
     WM_APP_OCR_DONE, post_boxed,
 };
 use crate::win32_util::{
-    create_ui_font, hinstance, invalidate_all, register_window_class, save_png_dialog,
+    create_ui_font, hinstance, invalidate_all, register_window_class, s_px, save_png_dialog,
     set_control_font,
 };
 
@@ -46,17 +48,50 @@ const CAPTURE_OVERLAY_CLASS: &str = "SuiteCaptureOverlayWnd";
 const EDIT_CHILD_ID: usize = 5001;
 const TIMER_STATUS_HIDE: usize = 2;
 
+#[derive(Debug, Clone)]
+pub struct CaptureToolPrefs {
+    pub ellipse_mode: bool,
+    pub curve_style: CurveStyle,
+    pub blur_mode: bool,
+    pub color_bgr: (u8, u8, u8),
+    pub stroke_thickness: i32,
+    pub marker_thickness: i32,
+    pub mosaic_radius: i32,
+    pub eraser_thickness: i32,
+    pub number_radius: i32,
+    pub text_size: i32,
+}
+
+impl Default for CaptureToolPrefs {
+    fn default() -> Self {
+        Self {
+            ellipse_mode: false,
+            curve_style: CurveStyle::Solid,
+            blur_mode: false,
+            color_bgr: (PixelDraw::STROKE_B, PixelDraw::STROKE_G, PixelDraw::STROKE_R),
+            stroke_thickness: 4,
+            marker_thickness: 14,
+            mosaic_radius: 16,
+            eraser_thickness: 18,
+            number_radius: 16,
+            text_size: 18,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OverlayPhase {
     Select,
     Annotate,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum SubHit {
     ShapeRect,
     ShapeEllipse,
     CurveStyle(CurveStyle),
+    MosaicPixel,
+    MosaicBlur,
     SizeChip(i32),
     Swatch(usize),
 }
@@ -64,6 +99,7 @@ enum SubHit {
 struct CaptureShared {
     controller: HWND,
     d2d: Rc<RefCell<D2dRenderer>>,
+    prefs: Rc<RefCell<CaptureToolPrefs>>,
     frames: Vec<MonitorCapture>,
     dimmed_frames: Vec<PixelBuffer>,
     windows: Vec<HWND>,
@@ -92,13 +128,16 @@ struct CaptureShared {
     redo: Vec<AnnotationOp>,
     active_tool: Option<AnnotateTool>,
     hover_tool: Option<AnnotateTool>,
+    hover_sub: Option<SubHit>,
     ellipse_mode: bool,
     curve_style: CurveStyle,
+    blur_mode: bool,
     color_bgr: (u8, u8, u8),
     stroke_thickness: i32,
     marker_thickness: i32,
     mosaic_radius: i32,
     eraser_thickness: i32,
+    number_radius: i32,
     text_size: i32,
 
     // Interactive draw/resize/move
@@ -147,6 +186,7 @@ impl CaptureSession {
         pin_after_capture: bool,
         show_magnifier: bool,
         save_dir: String,
+        prefs: Rc<RefCell<CaptureToolPrefs>>,
     ) -> Result<Self, String> {
         let frames = ScreenCapturePipeline::capture_all()?;
         let dimmed_frames: Vec<PixelBuffer> = frames
@@ -165,10 +205,12 @@ impl CaptureSession {
         let cursor_virtual = MonitorEnumerator::cursor_pos();
         let edit_bg_brush = unsafe { CreateSolidBrush(COLORREF(0x001E_1E1E)) };
         let dummy_buf = PixelBuffer::allocate(1, 1);
+        let p = prefs.borrow().clone();
 
         let shared = Rc::new(RefCell::new(CaptureShared {
             controller,
             d2d,
+            prefs,
             frames,
             dimmed_frames,
             windows: Vec::new(),
@@ -193,14 +235,17 @@ impl CaptureSession {
             redo: Vec::new(),
             active_tool: None,
             hover_tool: None,
-            ellipse_mode: false,
-            curve_style: CurveStyle::Solid,
-            color_bgr: (PixelDraw::STROKE_B, PixelDraw::STROKE_G, PixelDraw::STROKE_R),
-            stroke_thickness: 4,
-            marker_thickness: 14,
-            mosaic_radius: 16,
-            eraser_thickness: 18,
-            text_size: 18,
+            hover_sub: None,
+            ellipse_mode: p.ellipse_mode,
+            curve_style: p.curve_style,
+            blur_mode: p.blur_mode,
+            color_bgr: p.color_bgr,
+            stroke_thickness: p.stroke_thickness,
+            marker_thickness: p.marker_thickness,
+            mosaic_radius: p.mosaic_radius,
+            eraser_thickness: p.eraser_thickness,
+            number_radius: p.number_radius,
+            text_size: p.text_size,
             drawing_stroke: false,
             draw_start_px: (0, 0),
             draw_curr_px: (0, 0),
@@ -222,17 +267,17 @@ impl CaptureSession {
 
         let cls = to_wide_null(CAPTURE_OVERLAY_CLASS);
         let title = to_wide_null("Suite Capture");
-        let mon_bounds: Vec<PixelRect> = shared
+        let mon_info: Vec<(PixelRect, u32)> = shared
             .borrow()
             .frames
             .iter()
-            .map(|f| f.monitor.bounds)
+            .map(|f| (f.monitor.bounds, f.monitor.dpi_x.max(96)))
             .collect();
 
         let mut first_hwnd = HWND::default();
-        for (idx, b) in mon_bounds.iter().enumerate() {
-            let font_ui = create_ui_font(12, false, false, "Microsoft YaHei UI");
-            let font_small = create_ui_font(11, false, false, "Segoe UI");
+        for (idx, &(b, mon_dpi)) in mon_info.iter().enumerate() {
+            let font_ui = create_ui_font(s_px(13, mon_dpi), false, false, "Microsoft YaHei UI");
+            let font_small = create_ui_font(s_px(12, mon_dpi), false, false, "Microsoft YaHei UI");
             let state = Rc::new(RefCell::new(PerMonitorOverlay {
                 mon_idx: idx,
                 shared: Rc::clone(&shared),
@@ -420,27 +465,150 @@ fn ensure_bake(s: &mut CaptureShared) {
     s.bake_dirty = false;
 }
 
-fn toolbar_width() -> i32 {
-    // 15 cells * 36 + 2 separators * 8 + 16 horizontal padding
-    (AnnotateToolbar::ORDER.len() as i32) * (AnnotateToolbar::CELL as i32)
-        + 2 * (AnnotateToolbar::SEPARATOR_WIDTH as i32)
-        + 16
+fn tb_dpi(s: &CaptureShared) -> u32 {
+    s.frames
+        .get(s.dom_mon_idx)
+        .map(|f| f.monitor.dpi_x.max(96))
+        .unwrap_or(96)
 }
 
-fn subbar_width(tool: AnnotateTool) -> i32 {
+fn toolbar_width_px(dpi: u32) -> i32 {
+    let cell = s_px(AnnotateToolbar::CELL as i32, dpi);
+    let sep = s_px(AnnotateToolbar::SEPARATOR_WIDTH as i32, dpi);
+    let pad = s_px(16, dpi);
+    (AnnotateToolbar::ORDER.len() as i32) * cell + 2 * sep + pad
+}
+
+#[derive(Clone)]
+struct SubbarItem {
+    hit: SubHit,
+    label: &'static str,
+    rect: RECT,
+    active: bool,
+    swatch_bgr: Option<(u8, u8, u8)>,
+}
+
+fn build_subbar_items(s: &CaptureShared, tool: AnnotateTool, sx: i32, sy: i32, dpi: u32) -> (Vec<SubbarItem>, i32) {
+    let sh = s_px(AnnotateToolbar::SUB_BAR_HEIGHT as i32, dpi);
+    let chip_top = sy + s_px(6, dpi);
+    let chip_bot = sy + sh - s_px(6, dpi);
+    let swatch_top = sy + s_px(8, dpi);
+    let swatch_bot = sy + sh - s_px(8, dpi);
+    let gap4 = s_px(4, dpi);
+    let gap8 = s_px(8, dpi);
+
+    let mut items = Vec::new();
+    let mut x = sx + gap8;
+
     match tool {
-        AnnotateTool::Shape => 360,
-        AnnotateTool::Curve => 390,
-        AnnotateTool::Pencil | AnnotateTool::Marker | AnnotateTool::Text => 320,
-        AnnotateTool::Mosaic | AnnotateTool::Eraser => 150,
-        _ => 120,
+        AnnotateTool::Shape => {
+            let w = s_px(42, dpi);
+            items.push(SubbarItem {
+                hit: SubHit::ShapeRect,
+                label: "矩形",
+                rect: RECT { left: x, top: chip_top, right: x + w, bottom: chip_bot },
+                active: !s.ellipse_mode,
+                swatch_bgr: None,
+            });
+            x += w + gap4;
+            items.push(SubbarItem {
+                hit: SubHit::ShapeEllipse,
+                label: "椭圆",
+                rect: RECT { left: x, top: chip_top, right: x + w, bottom: chip_bot },
+                active: s.ellipse_mode,
+                swatch_bgr: None,
+            });
+            x += w + gap8;
+        }
+        AnnotateTool::Curve => {
+            let w = s_px(38, dpi);
+            for &(style, label) in &[
+                (CurveStyle::Solid, "直线"),
+                (CurveStyle::Dashed, "虚线"),
+                (CurveStyle::Arrow, "箭头"),
+            ] {
+                items.push(SubbarItem {
+                    hit: SubHit::CurveStyle(style),
+                    label,
+                    rect: RECT { left: x, top: chip_top, right: x + w, bottom: chip_bot },
+                    active: s.curve_style == style,
+                    swatch_bgr: None,
+                });
+                x += w + gap4;
+            }
+            x += gap4;
+        }
+        AnnotateTool::Mosaic => {
+            let w1 = s_px(50, dpi);
+            items.push(SubbarItem {
+                hit: SubHit::MosaicPixel,
+                label: "马赛克",
+                rect: RECT { left: x, top: chip_top, right: x + w1, bottom: chip_bot },
+                active: !s.blur_mode,
+                swatch_bgr: None,
+            });
+            x += w1 + gap4;
+            let w2 = s_px(42, dpi);
+            items.push(SubbarItem {
+                hit: SubHit::MosaicBlur,
+                label: "模糊",
+                rect: RECT { left: x, top: chip_top, right: x + w2, bottom: chip_bot },
+                active: s.blur_mode,
+                swatch_bgr: None,
+            });
+            x += w2 + gap8;
+        }
+        _ => {}
     }
+
+    let (chips, current_val): (&[i32], i32) = match tool {
+        AnnotateTool::Marker => (&AnnotateToolbar::MARKER_THICKNESS_CHIPS, s.marker_thickness),
+        AnnotateTool::Mosaic => (&AnnotateToolbar::MOSAIC_RADIUS_CHIPS, s.mosaic_radius),
+        AnnotateTool::Number => (&AnnotateToolbar::NUMBER_RADIUS_CHIPS, s.number_radius),
+        AnnotateTool::Eraser => (&AnnotateToolbar::ERASER_THICKNESS_CHIPS, s.eraser_thickness),
+        AnnotateTool::Text => (&AnnotateToolbar::TEXT_SIZE_CHIPS, s.text_size),
+        _ => (&AnnotateToolbar::THICKNESS_CHIPS, s.stroke_thickness),
+    };
+    let size_w = s_px(30, dpi);
+    for &c in chips {
+        items.push(SubbarItem {
+            hit: SubHit::SizeChip(c),
+            label: "",
+            rect: RECT { left: x, top: chip_top, right: x + size_w, bottom: chip_bot },
+            active: c == current_val,
+            swatch_bgr: None,
+        });
+        x += size_w + gap4;
+    }
+
+    if !matches!(tool, AnnotateTool::Mosaic | AnnotateTool::Eraser) {
+        x += gap4;
+        let sw_w = s_px(20, dpi);
+        for (idx, &(r, g, b)) in AnnotateToolbar::PALETTE.iter().enumerate() {
+            items.push(SubbarItem {
+                hit: SubHit::Swatch(idx),
+                label: "",
+                rect: RECT { left: x, top: swatch_top, right: x + sw_w, bottom: swatch_bot },
+                active: s.color_bgr == (b, g, r),
+                swatch_bgr: Some((b, g, r)),
+            });
+            x += sw_w + gap4;
+        }
+    }
+
+    let right_edge = items.last().map(|it| it.rect.right).unwrap_or(x);
+    let total_w = (right_edge - sx + gap8).max(s_px(120, dpi));
+    (items, total_w)
 }
 
 fn toolbar_stack_placement(s: &CaptureShared) -> (StackPlacement, i32, i32) {
+    let dpi = tb_dpi(s);
     let mon = &s.frames[s.dom_mon_idx].monitor;
     let work = mon.work_area;
-    let main_w = toolbar_width() as f64;
+    let main_w = toolbar_width_px(dpi);
+    let main_h = s_px(AnnotateToolbar::HEIGHT as i32, dpi) as f64;
+    let sub_h = s_px(AnnotateToolbar::SUB_BAR_HEIGHT as i32, dpi) as f64;
+    let gap = s_px(AnnotateToolbar::GAP as i32, dpi) as f64;
     let show_sub = s
         .active_tool
         .map(AnnotateToolbar::shows_property_bar)
@@ -450,39 +618,62 @@ fn toolbar_stack_placement(s: &CaptureShared) -> (StackPlacement, i32, i32) {
         s.selection.y as f64,
         s.selection.width as f64,
         s.selection.height as f64,
-        main_w,
-        AnnotateToolbar::HEIGHT,
-        AnnotateToolbar::SUB_BAR_HEIGHT,
+        main_w as f64,
+        main_h,
+        sub_h,
         show_sub,
         work.x as f64,
         work.y as f64,
         work.right() as f64,
         work.bottom() as f64,
-        AnnotateToolbar::GAP,
+        gap,
     );
-    let sub_w = s.active_tool.map(subbar_width).unwrap_or(120);
-    (place, main_w as i32, sub_w)
+    let sub_w = s
+        .active_tool
+        .filter(|&t| AnnotateToolbar::shows_property_bar(t))
+        .map(|t| build_subbar_items(s, t, place.left.round() as i32, place.sub_top.round() as i32, dpi).1)
+        .unwrap_or_else(|| s_px(120, dpi));
+    (place, main_w, sub_w)
+}
+
+fn toolbar_items(s: &CaptureShared) -> Vec<(AnnotateTool, RECT, Option<i32>)> {
+    let dpi = tb_dpi(s);
+    let (place, _, _) = toolbar_stack_placement(s);
+    let mx = place.left.round() as i32;
+    let my = place.main_top.round() as i32;
+    let mh = s_px(AnnotateToolbar::HEIGHT as i32, dpi);
+    let cell = s_px(AnnotateToolbar::CELL as i32, dpi);
+    let sep = s_px(AnnotateToolbar::SEPARATOR_WIDTH as i32, dpi);
+    let mut x = mx + s_px(8, dpi);
+    let mut out = Vec::with_capacity(AnnotateToolbar::ORDER.len());
+    for &tool in &AnnotateToolbar::ORDER {
+        let sep_x = if matches!(tool, AnnotateTool::Undo | AnnotateTool::Close) {
+            let sx = x + sep / 2;
+            x += sep;
+            Some(sx)
+        } else {
+            None
+        };
+        out.push((
+            tool,
+            RECT {
+                left: x,
+                top: my,
+                right: x + cell,
+                bottom: my + mh,
+            },
+            sep_x,
+        ));
+        x += cell;
+    }
+    out
 }
 
 fn hit_test_toolbar(s: &CaptureShared, vx: i32, vy: i32) -> Option<AnnotateTool> {
-    let (place, main_w, _) = toolbar_stack_placement(s);
-    let mx = place.left.round() as i32;
-    let my = place.main_top.round() as i32;
-    let mh = AnnotateToolbar::HEIGHT as i32;
-    if vx < mx || vy < my || vx >= mx + main_w || vy >= my + mh {
-        return None;
-    }
-    let mut x = mx + 8;
-    let cell = AnnotateToolbar::CELL as i32;
-    let sep = AnnotateToolbar::SEPARATOR_WIDTH as i32;
-    for &tool in &AnnotateToolbar::ORDER {
-        if matches!(tool, AnnotateTool::Undo | AnnotateTool::Close) {
-            x += sep;
-        }
-        if vx >= x && vx < x + cell {
+    for (tool, rc, _) in toolbar_items(s) {
+        if vx >= rc.left && vx < rc.right && vy >= rc.top && vy < rc.bottom {
             return Some(tool);
         }
-        x += cell;
     }
     None
 }
@@ -492,65 +683,14 @@ fn hit_test_subbar(s: &CaptureShared, vx: i32, vy: i32) -> Option<SubHit> {
     if !AnnotateToolbar::shows_property_bar(tool) {
         return None;
     }
-    let (place, _, sub_w) = toolbar_stack_placement(s);
+    let dpi = tb_dpi(s);
+    let (place, _, _) = toolbar_stack_placement(s);
     let sx = place.left.round() as i32;
     let sy = place.sub_top.round() as i32;
-    let sh = AnnotateToolbar::SUB_BAR_HEIGHT as i32;
-    if vx < sx || vy < sy || vx >= sx + sub_w || vy >= sy + sh {
-        return None;
-    }
-
-    let mut x = sx + 8;
-    // Mode chips
-    match tool {
-        AnnotateTool::Shape => {
-            if vx >= x && vx < x + 40 {
-                return Some(SubHit::ShapeRect);
-            }
-            x += 44;
-            if vx >= x && vx < x + 40 {
-                return Some(SubHit::ShapeEllipse);
-            }
-            x += 48;
-        }
-        AnnotateTool::Curve => {
-            for &(style, w) in &[
-                (CurveStyle::Solid, 36),
-                (CurveStyle::Dashed, 36),
-                (CurveStyle::Arrow, 36),
-            ] {
-                if vx >= x && vx < x + w {
-                    return Some(SubHit::CurveStyle(style));
-                }
-                x += w + 4;
-            }
-            x += 4;
-        }
-        _ => {}
-    }
-
-    // Size chips
-    let chips: &[i32] = match tool {
-        AnnotateTool::Marker => &AnnotateToolbar::MARKER_THICKNESS_CHIPS,
-        AnnotateTool::Mosaic => &AnnotateToolbar::MOSAIC_RADIUS_CHIPS,
-        AnnotateTool::Eraser => &AnnotateToolbar::ERASER_THICKNESS_CHIPS,
-        AnnotateTool::Text => &AnnotateToolbar::TEXT_SIZE_CHIPS,
-        _ => &AnnotateToolbar::THICKNESS_CHIPS,
-    };
-    for &c in chips {
-        if vx >= x && vx < x + 28 {
-            return Some(SubHit::SizeChip(c));
-        }
-        x += 32;
-    }
-
-    if !matches!(tool, AnnotateTool::Mosaic | AnnotateTool::Eraser) {
-        x += 8;
-        for idx in 0..AnnotateToolbar::PALETTE.len() {
-            if vx >= x && vx < x + 20 {
-                return Some(SubHit::Swatch(idx));
-            }
-            x += 24;
+    let (items, _) = build_subbar_items(s, tool, sx, sy, dpi);
+    for it in items {
+        if vx >= it.rect.left && vx < it.rect.right && vy >= it.rect.top && vy < it.rect.bottom {
+            return Some(it.hit);
         }
     }
     None
@@ -574,6 +714,8 @@ fn enter_annotate_phase(shared: &Rc<RefCell<CaptureShared>>, rect: PixelRect) {
         s.ops.clear();
         s.redo.clear();
         s.active_tool = None;
+        s.hover_tool = None;
+        s.hover_sub = None;
         dom_hwnd = s.windows.get(dom_idx).copied().unwrap_or(s.primary_hwnd);
         for (i, &w) in s.windows.iter().enumerate() {
             if i != dom_idx {
@@ -727,6 +869,7 @@ fn trigger_toolbar_action(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, tool:
         | AnnotateTool::Pencil
         | AnnotateTool::Marker
         | AnnotateTool::Mosaic
+        | AnnotateTool::Number
         | AnnotateTool::Text
         | AnnotateTool::Eraser
         | AnnotateTool::Pick => {
@@ -737,6 +880,7 @@ fn trigger_toolbar_action(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, tool:
             } else {
                 Some(tool)
             };
+            s.hover_sub = None;
         }
         AnnotateTool::Undo => {
             commit_text_entry_if_open(shared);
@@ -1171,6 +1315,10 @@ unsafe extern "system" fn capture_wnd_proc(
                         commit_and_finish(&shared, false, false);
                         return LRESULT(0);
                     }
+                    if ctrl && shift && vk == b'S' as u16 {
+                        commit_and_finish(&shared, false, true);
+                        return LRESULT(0);
+                    }
                     if ctrl && vk == b'S' as u16 {
                         trigger_toolbar_action(&shared, hwnd, AnnotateTool::Save);
                         return LRESULT(0);
@@ -1190,11 +1338,53 @@ unsafe extern "system" fn capture_wnd_proc(
                             0x33 => Some(AnnotateTool::Pencil),
                             0x34 => Some(AnnotateTool::Marker),
                             0x35 => Some(AnnotateTool::Mosaic),
-                            0x36 => Some(AnnotateTool::Text),
+                            0x36 => Some(AnnotateTool::Number),
+                            0x37 => Some(AnnotateTool::Text),
+                            x if x == b'I' as u16 => Some(AnnotateTool::Pick),
+                            x if x == b'E' as u16 => Some(AnnotateTool::Eraser),
                             _ => None,
                         };
                         if let Some(t) = shortcut_tool {
                             trigger_toolbar_action(&shared, hwnd, t);
+                            return LRESULT(0);
+                        }
+                        if shared.borrow().active_tool.is_none()
+                            && matches!(vk, x if x == VK_LEFT.0 || x == VK_RIGHT.0 || x == VK_UP.0 || x == VK_DOWN.0)
+                        {
+                            let step = if shift { 10 } else { 1 };
+                            let (dx, dy) = if vk == VK_LEFT.0 {
+                                (-step, 0)
+                            } else if vk == VK_RIGHT.0 {
+                                (step, 0)
+                            } else if vk == VK_UP.0 {
+                                (0, -step)
+                            } else {
+                                (0, step)
+                            };
+                            let mut show_warn = false;
+                            {
+                                let mut s = shared.borrow_mut();
+                                if s.ops.is_empty() {
+                                    let bounds: Vec<PixelRect> = s.frames.iter().map(|f| f.monitor.bounds).collect();
+                                    let clamp = CaptureUx::union_monitor_bounds(&bounds, s.frames[s.dom_mon_idx].monitor.bounds);
+                                    let moved = CaptureUx::move_rect(s.selection, dx, dy, clamp);
+                                    s.selection = moved;
+                                    let crop = RegionCropper::crop(&s.frames, moved)
+                                        .unwrap_or_else(|_| PixelBuffer::allocate(1, 1));
+                                    s.baked_crop = crop.clone();
+                                    s.original_crop = crop;
+                                    s.bake_dirty = false;
+                                } else {
+                                    s.status_text = Some("已有标注，撤销后可用方向键微调选区".to_string());
+                                    show_warn = true;
+                                }
+                            }
+                            if show_warn {
+                                unsafe {
+                                    let _ = SetTimer(Some(hwnd), TIMER_STATUS_HIDE, 1800, None);
+                                }
+                            }
+                            invalidate_all(hwnd);
                             return LRESULT(0);
                         }
                     }
@@ -1202,9 +1392,121 @@ unsafe extern "system" fn capture_wnd_proc(
             }
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
+        WM_MOUSEWHEEL => {
+            let shared = Rc::clone(&mon_rc.borrow().shared);
+            let can_step = {
+                let s = shared.borrow();
+                s.phase == OverlayPhase::Annotate
+                    && s.text_edit.is_invalid()
+                    && !s.drawing_stroke
+                    && s.active_tool.map(AnnotateToolbar::shows_property_bar).unwrap_or(false)
+            };
+            if can_step {
+                let delta = ((wparam.0 >> 16) as u16) as i16;
+                let dir = if delta > 0 { 1 } else { -1 };
+                let msg_text = {
+                    let mut s = shared.borrow_mut();
+                    let label_val = match s.active_tool {
+                        Some(AnnotateTool::Marker) => {
+                            s.marker_thickness = (s.marker_thickness + dir * 2).clamp(6, 36);
+                            ("马克笔粗细", s.marker_thickness)
+                        }
+                        Some(AnnotateTool::Mosaic) => {
+                            s.mosaic_radius = (s.mosaic_radius + dir * 2).clamp(6, 48);
+                            (if s.blur_mode { "模糊半径" } else { "马赛克半径" }, s.mosaic_radius)
+                        }
+                        Some(AnnotateTool::Number) => {
+                            s.number_radius = (s.number_radius + dir * 2).clamp(10, 32);
+                            ("序号圆标半径", s.number_radius)
+                        }
+                        Some(AnnotateTool::Eraser) => {
+                            s.eraser_thickness = (s.eraser_thickness + dir * 2).clamp(6, 48);
+                            ("橡皮擦粗细", s.eraser_thickness)
+                        }
+                        Some(AnnotateTool::Text) => {
+                            s.text_size = (s.text_size + dir * 2).clamp(10, 48);
+                            ("文字字号", s.text_size)
+                        }
+                        _ => {
+                            s.stroke_thickness = (s.stroke_thickness + dir).clamp(1, 16);
+                            ("线条粗细", s.stroke_thickness)
+                        }
+                    };
+                    sync_prefs_from_shared(&s);
+                    format!("{}: {} px", label_val.0, label_val.1)
+                };
+                shared.borrow_mut().status_text = Some(msg_text);
+                unsafe {
+                    let _ = SetTimer(Some(hwnd), TIMER_STATUS_HIDE, 1200, None);
+                }
+                invalidate_all(hwnd);
+                return LRESULT(0);
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
         WM_DESTROY => LRESULT(0),
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
+}
+
+fn sync_prefs_from_shared(s: &CaptureShared) {
+    let mut p = s.prefs.borrow_mut();
+    p.ellipse_mode = s.ellipse_mode;
+    p.curve_style = s.curve_style;
+    p.blur_mode = s.blur_mode;
+    p.color_bgr = s.color_bgr;
+    p.stroke_thickness = s.stroke_thickness;
+    p.marker_thickness = s.marker_thickness;
+    p.mosaic_radius = s.mosaic_radius;
+    p.eraser_thickness = s.eraser_thickness;
+    p.number_radius = s.number_radius;
+    p.text_size = s.text_size;
+}
+
+fn next_step_number(ops: &[AnnotationOp]) -> u32 {
+    ops.iter()
+        .filter(|op| matches!(op, AnnotationOp::StepBadge { .. }))
+        .count() as u32
+        + 1
+}
+
+fn constrain_draw_point(
+    tool: Option<AnnotateTool>,
+    start: (i32, i32),
+    curr: (i32, i32),
+    shift: bool,
+    max_w: i32,
+    max_h: i32,
+) -> (i32, i32) {
+    if !shift {
+        return curr;
+    }
+    let dx = curr.0 - start.0;
+    let dy = curr.1 - start.1;
+    let (cx, cy) = match tool {
+        Some(AnnotateTool::Shape) => {
+            let side = dx.abs().max(dy.abs());
+            let sx = if dx < 0 { -side } else { side };
+            let sy = if dy < 0 { -side } else { side };
+            (start.0 + sx, start.1 + sy)
+        }
+        Some(AnnotateTool::Curve) => {
+            let len = (f64::from(dx) * f64::from(dx) + f64::from(dy) * f64::from(dy)).sqrt();
+            if len < 1.0 {
+                curr
+            } else {
+                let angle = f64::from(dy).atan2(f64::from(dx));
+                let snap = std::f64::consts::FRAC_PI_4;
+                let snapped = (angle / snap).round() * snap;
+                (
+                    start.0 + (len * snapped.cos()).round() as i32,
+                    start.1 + (len * snapped.sin()).round() as i32,
+                )
+            }
+        }
+        _ => curr,
+    };
+    (cx.clamp(0, (max_w - 1).max(0)), cy.clamp(0, (max_h - 1).max(0)))
 }
 
 fn handle_annotate_lbuttondown(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, vx: i32, vy: i32) {
@@ -1219,9 +1521,12 @@ fn handle_annotate_lbuttondown(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, 
             SubHit::ShapeRect => s.ellipse_mode = false,
             SubHit::ShapeEllipse => s.ellipse_mode = true,
             SubHit::CurveStyle(style) => s.curve_style = style,
+            SubHit::MosaicPixel => s.blur_mode = false,
+            SubHit::MosaicBlur => s.blur_mode = true,
             SubHit::SizeChip(val) => match s.active_tool {
                 Some(AnnotateTool::Marker) => s.marker_thickness = val,
                 Some(AnnotateTool::Mosaic) => s.mosaic_radius = val,
+                Some(AnnotateTool::Number) => s.number_radius = val,
                 Some(AnnotateTool::Eraser) => s.eraser_thickness = val,
                 Some(AnnotateTool::Text) => s.text_size = val,
                 _ => s.stroke_thickness = val,
@@ -1232,6 +1537,7 @@ fn handle_annotate_lbuttondown(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, 
                 }
             }
         }
+        sync_prefs_from_shared(&s);
         drop(s);
         invalidate_all(hwnd);
         return;
@@ -1292,6 +1598,28 @@ fn handle_annotate_lbuttondown(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, 
         Some(AnnotateTool::Text) => {
             open_text_entry(shared, hwnd, vx, vy);
         }
+        Some(AnnotateTool::Number) => {
+            let mut s = shared.borrow_mut();
+            let px = (vx - s.selection.x).clamp(0, (s.original_crop.width - 1).max(0));
+            let py = (vy - s.selection.y).clamp(0, (s.original_crop.height - 1).max(0));
+            let number = next_step_number(&s.ops);
+            let (b, g, r) = s.color_bgr;
+            let radius = s.number_radius;
+            s.ops.push(AnnotationOp::StepBadge {
+                cx: px,
+                cy: py,
+                number,
+                radius,
+                b,
+                g,
+                r,
+            });
+            s.redo.clear();
+            s.bake_dirty = true;
+            ensure_bake(&mut s);
+            drop(s);
+            invalidate_all(hwnd);
+        }
         Some(AnnotateTool::Pick) => {
             let status = {
                 let mut s = shared.borrow_mut();
@@ -1325,7 +1653,11 @@ fn handle_annotate_lbuttondown(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, 
             if active == AnnotateTool::Mosaic {
                 ensure_bake(&mut s);
                 let mut draft = s.baked_crop.clone();
-                PixelDraw::mosaic_stamp(&mut draft, px, py, s.mosaic_radius, PixelDraw::DEFAULT_MOSAIC_BLOCK);
+                if s.blur_mode {
+                    PixelDraw::blur_stamp(&mut draft, px, py, s.mosaic_radius);
+                } else {
+                    PixelDraw::mosaic_stamp(&mut draft, px, py, s.mosaic_radius, PixelDraw::DEFAULT_MOSAIC_BLOCK);
+                }
                 s.mosaic_draft = Some(draft);
                 s.mosaic_draft_last = 0;
             }
@@ -1338,11 +1670,14 @@ fn handle_annotate_lbuttondown(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, 
 }
 
 fn handle_annotate_mousemove(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, vx: i32, vy: i32) {
+    let shift_down = unsafe { GetKeyState(i32::from(VK_SHIFT.0)) } < 0;
     let mut need_invalidate = false;
     let cursor_res = {
         let mut s = shared.borrow_mut();
         s.cursor_virtual = (vx, vy);
         if s.resizing {
+            s.hover_tool = None;
+            s.hover_sub = None;
             let next = CaptureUx::resize_rect(s.resize_origin, s.resize_handle, vx, vy);
             if next.width >= CaptureUx::MIN_COMMIT_PX && next.height >= CaptureUx::MIN_COMMIT_PX {
                 s.selection = next;
@@ -1350,6 +1685,8 @@ fn handle_annotate_mousemove(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, vx
             }
             cursor_for_handle(s.resize_handle)
         } else if s.moving_sel {
+            s.hover_tool = None;
+            s.hover_sub = None;
             let bounds: Vec<PixelRect> = s.frames.iter().map(|f| f.monitor.bounds).collect();
             let clamp = CaptureUx::union_monitor_bounds(&bounds, s.frames[s.dom_mon_idx].monitor.bounds);
             let dx = vx - s.move_start_virt.0;
@@ -1358,12 +1695,23 @@ fn handle_annotate_mousemove(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, vx
             need_invalidate = true;
             IDC_SIZEALL
         } else if s.drawing_stroke {
-            let px = (vx - s.selection.x).clamp(0, (s.original_crop.width - 1).max(0));
-            let py = (vy - s.selection.y).clamp(0, (s.original_crop.height - 1).max(0));
+            s.hover_tool = None;
+            s.hover_sub = None;
+            let raw_px = (vx - s.selection.x).clamp(0, (s.original_crop.width - 1).max(0));
+            let raw_py = (vy - s.selection.y).clamp(0, (s.original_crop.height - 1).max(0));
+            let (px, py) = constrain_draw_point(
+                s.active_tool,
+                s.draw_start_px,
+                (raw_px, raw_py),
+                shift_down,
+                s.original_crop.width,
+                s.original_crop.height,
+            );
             s.draw_curr_px = (px, py);
             s.stroke_pts.push((px, py));
             if s.active_tool == Some(AnnotateTool::Mosaic) {
                 let radius = s.mosaic_radius;
+                let blur_mode = s.blur_mode;
                 let from = s.mosaic_draft_last;
                 let seg = if from < s.stroke_pts.len() {
                     s.stroke_pts[from..].to_vec()
@@ -1373,7 +1721,11 @@ fn handle_annotate_mousemove(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, vx
                 if seg.len() >= 2
                     && let Some(ref mut draft) = s.mosaic_draft
                 {
-                    PixelDraw::mosaic_brush(draft, &seg, radius, PixelDraw::DEFAULT_MOSAIC_BLOCK);
+                    if blur_mode {
+                        PixelDraw::blur_brush(draft, &seg, radius);
+                    } else {
+                        PixelDraw::mosaic_brush(draft, &seg, radius, PixelDraw::DEFAULT_MOSAIC_BLOCK);
+                    }
                     s.mosaic_draft_last = s.stroke_pts.len() - 1;
                 }
             }
@@ -1381,11 +1733,17 @@ fn handle_annotate_mousemove(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, vx
             IDC_CROSS
         } else {
             let hover_tb = hit_test_toolbar(&s, vx, vy);
-            if hover_tb != s.hover_tool {
+            let hover_sb = if hover_tb.is_none() {
+                hit_test_subbar(&s, vx, vy)
+            } else {
+                None
+            };
+            if hover_tb != s.hover_tool || hover_sb != s.hover_sub {
                 s.hover_tool = hover_tb;
+                s.hover_sub = hover_sb.clone();
                 need_invalidate = true;
             }
-            if hover_tb.is_some() || hit_test_subbar(&s, vx, vy).is_some() {
+            if hover_tb.is_some() || hover_sb.is_some() {
                 IDC_ARROW
             } else if s.active_tool.is_some() && s.selection.contains(vx, vy) {
                 IDC_CROSS
@@ -1415,6 +1773,7 @@ fn handle_annotate_mousemove(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, vx
 }
 
 fn handle_annotate_lbuttonup(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, vx: i32, vy: i32) {
+    let shift_down = unsafe { GetKeyState(i32::from(VK_SHIFT.0)) } < 0;
     let mut s = shared.borrow_mut();
     if s.resizing || s.moving_sel {
         s.resizing = false;
@@ -1442,18 +1801,35 @@ fn handle_annotate_lbuttonup(shared: &Rc<RefCell<CaptureShared>>, hwnd: HWND, vx
     unsafe {
         let _ = ReleaseCapture();
     }
-    let px = (vx - s.selection.x).clamp(0, (s.original_crop.width - 1).max(0));
-    let py = (vy - s.selection.y).clamp(0, (s.original_crop.height - 1).max(0));
+    let raw_px = (vx - s.selection.x).clamp(0, (s.original_crop.width - 1).max(0));
+    let raw_py = (vy - s.selection.y).clamp(0, (s.original_crop.height - 1).max(0));
+    let (px, py) = constrain_draw_point(
+        s.active_tool,
+        s.draw_start_px,
+        (raw_px, raw_py),
+        shift_down,
+        s.original_crop.width,
+        s.original_crop.height,
+    );
     s.draw_curr_px = (px, py);
     let pts = std::mem::take(&mut s.stroke_pts);
     s.mosaic_draft = None;
 
     let (b, g, r) = s.color_bgr;
     let op = match s.active_tool {
-        Some(AnnotateTool::Mosaic) if !pts.is_empty() => Some(AnnotationOp::MosaicStroke {
-            points: pts,
-            brush_radius: s.mosaic_radius,
-        }),
+        Some(AnnotateTool::Mosaic) if !pts.is_empty() => {
+            if s.blur_mode {
+                Some(AnnotationOp::BlurStroke {
+                    points: pts,
+                    brush_radius: s.mosaic_radius,
+                })
+            } else {
+                Some(AnnotationOp::MosaicStroke {
+                    points: pts,
+                    brush_radius: s.mosaic_radius,
+                })
+            }
+        }
         Some(AnnotateTool::Eraser) if !pts.is_empty() => Some(AnnotationOp::Erase {
             points: pts,
             thickness: s.eraser_thickness,
@@ -1710,25 +2086,54 @@ fn paint_capture_overlay(hwnd: HWND, mon: &mut PerMonitorOverlay) {
 
             draw_annotate_toolbar(mem, &s, b, mon.font_small);
             draw_annotate_subbar(mem, &s, b, mon.font_small);
+            draw_hover_tooltip(mem, &s, b, cw, ch, mon.font_small);
 
             if let Some(ref st_text) = s.status_text {
+                let dpi = tb_dpi(&s);
                 let (place, _, _) = toolbar_stack_placement(&s);
-                let sx = (place.left.round() as i32) - b.x;
-                let sy = ((place.main_top.round() as i32) - b.y - 30).max(8);
-                let pill_rc = RECT {
-                    left: sx,
-                    top: sy,
-                    right: sx + 260,
-                    bottom: sy + 24,
+                let wt: Vec<u16> = st_text.encode_utf16().collect();
+                let old_f = SelectObject(mem, mon.font_ui.into());
+                let mut sz = SIZE::default();
+                let _ = GetTextExtentPoint32W(mem, &wt, &mut sz);
+                let pill_w = sz.cx + s_px(20, dpi);
+                let pill_h = (sz.cy + s_px(10, dpi)).max(s_px(26, dpi));
+                let span_top = if place.sub_visible {
+                    place.main_top.min(place.sub_top)
+                } else {
+                    place.main_top
+                };
+                let span_bot = if place.sub_visible {
+                    (place.main_top + f64::from(s_px(AnnotateToolbar::HEIGHT as i32, dpi)))
+                        .max(place.sub_top + f64::from(s_px(AnnotateToolbar::SUB_BAR_HEIGHT as i32, dpi)))
+                } else {
+                    place.main_top + f64::from(s_px(AnnotateToolbar::HEIGHT as i32, dpi))
+                };
+                let sx = ((place.left.round() as i32) - b.x).clamp(s_px(8, dpi), (cw - pill_w - s_px(8, dpi)).max(s_px(8, dpi)));
+                let above_y = (span_top.round() as i32) - b.y - pill_h - s_px(6, dpi);
+                let sy = if above_y >= s_px(8, dpi) {
+                    above_y
+                } else {
+                    ((span_bot.round() as i32) - b.y + s_px(6, dpi)).min((ch - pill_h - s_px(8, dpi)).max(s_px(8, dpi)))
                 };
                 let bg = CreateSolidBrush(COLORREF(0x001E_1E1E));
-                FillRect(mem, &pill_rc, bg);
+                let bd = CreatePen(PS_SOLID, 1, COLORREF(0x0052_5252));
+                let ob = SelectObject(mem, bg.into());
+                let op = SelectObject(mem, bd.into());
+                let _ = RoundRect(mem, sx, sy, sx + pill_w, sy + pill_h, s_px(6, dpi), s_px(6, dpi));
+                SelectObject(mem, op);
+                SelectObject(mem, ob);
+                let _ = DeleteObject(bd.into());
                 let _ = DeleteObject(bg.into());
-                let old_f = SelectObject(mem, mon.font_ui.into());
                 SetBkMode(mem, TRANSPARENT);
                 SetTextColor(mem, COLORREF(0x00FF_FFFF));
-                let wt: Vec<u16> = st_text.encode_utf16().collect();
-                let _ = TextOutW(mem, sx + 8, sy + 4, &wt);
+                let mut trc = RECT {
+                    left: sx,
+                    top: sy,
+                    right: sx + pill_w,
+                    bottom: sy + pill_h,
+                };
+                let mut wt_mut = wt;
+                DrawTextW(mem, &mut wt_mut, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 SelectObject(mem, old_f);
             }
         }
@@ -1835,43 +2240,55 @@ unsafe fn draw_size_chip(
     let (lx, ly) = pos;
     let (w, h) = size;
     let text = CaptureUx::size_chip(w, h);
-    let cy = if ly >= 26 { ly - 24 } else { ly + 4 };
-    let cx = lx.clamp(4, (cw - 110).max(4));
-    let rc = RECT {
-        left: cx,
-        top: cy,
-        right: cx + 102,
-        bottom: cy + 20,
-    };
+    let wt: Vec<u16> = text.encode_utf16().collect();
     unsafe {
+        let of = SelectObject(hdc, font.into());
+        let mut sz = SIZE::default();
+        let _ = GetTextExtentPoint32W(hdc, &wt, &mut sz);
+        let pad_x = 12;
+        let pad_y = 6;
+        let bw = (sz.cx + pad_x).max(68);
+        let bh = (sz.cy + pad_y).max(20);
+        let cy = if ly >= bh + 4 { ly - bh - 4 } else { ly + 4 };
+        let cx = lx.clamp(4, (cw - bw - 4).max(4));
+        let rc = RECT {
+            left: cx,
+            top: cy,
+            right: cx + bw,
+            bottom: cy + bh,
+        };
         let br = CreateSolidBrush(COLORREF(0x0010_1010));
         FillRect(hdc, &rc, br);
         let _ = DeleteObject(br.into());
-        let of = SelectObject(hdc, font.into());
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, COLORREF(0x00FF_FFFF));
-        let wt: Vec<u16> = text.encode_utf16().collect();
-        let _ = TextOutW(hdc, cx + 6, cy + 2, &wt);
+        let mut wmut = wt;
+        let mut trc = rc;
+        DrawTextW(hdc, &mut wmut, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SelectObject(hdc, of);
     }
 }
 
 unsafe fn draw_hint_chip(hdc: HDC, font: HFONT, text: &str) {
-    let rc = RECT {
-        left: 16,
-        top: 16,
-        right: 330,
-        bottom: 42,
-    };
+    let wt: Vec<u16> = text.encode_utf16().collect();
     unsafe {
+        let of = SelectObject(hdc, font.into());
+        let mut sz = SIZE::default();
+        let _ = GetTextExtentPoint32W(hdc, &wt, &mut sz);
+        let rc = RECT {
+            left: 16,
+            top: 16,
+            right: 16 + sz.cx + 20,
+            bottom: 16 + sz.cy + 12,
+        };
         let br = CreateSolidBrush(COLORREF(0x0010_1010));
         FillRect(hdc, &rc, br);
         let _ = DeleteObject(br.into());
-        let of = SelectObject(hdc, font.into());
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, COLORREF(0x00FF_FFFF));
-        let wt: Vec<u16> = text.encode_utf16().collect();
-        let _ = TextOutW(hdc, 24, 21, &wt);
+        let mut wmut = wt;
+        let mut trc = rc;
+        DrawTextW(hdc, &mut wmut, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SelectObject(hdc, of);
     }
 }
@@ -1905,8 +2322,53 @@ unsafe fn draw_live_draft(hdc: HDC, s: &CaptureShared, mon_bounds: PixelRect) {
                 }
             }
             Some(AnnotateTool::Curve) => {
-                let _ = MoveToEx(hdc, ox + s.draw_start_px.0, oy + s.draw_start_px.1, None);
-                let _ = LineTo(hdc, ox + s.draw_curr_px.0, oy + s.draw_curr_px.1);
+                let x1 = ox + s.draw_start_px.0;
+                let y1 = oy + s.draw_start_px.1;
+                let x2 = ox + s.draw_curr_px.0;
+                let y2 = oy + s.draw_curr_px.1;
+                match s.curve_style {
+                    CurveStyle::Solid => {
+                        let _ = MoveToEx(hdc, x1, y1, None);
+                        let _ = LineTo(hdc, x2, y2);
+                    }
+                    CurveStyle::Dashed => {
+                        let dx = f64::from(x2 - x1);
+                        let dy = f64::from(y2 - y1);
+                        let len = (dx * dx + dy * dy).sqrt();
+                        if len < 1.0 {
+                            let _ = MoveToEx(hdc, x1, y1, None);
+                            let _ = LineTo(hdc, x2, y2);
+                        } else {
+                            let step = 14.0;
+                            let on = 8.0;
+                            let mut d = 0.0;
+                            while d < len {
+                                let d_end = (d + on).min(len);
+                                let sx = x1 + ((dx * d) / len).round() as i32;
+                                let sy = y1 + ((dy * d) / len).round() as i32;
+                                let ex = x1 + ((dx * d_end) / len).round() as i32;
+                                let ey = y1 + ((dy * d_end) / len).round() as i32;
+                                let _ = MoveToEx(hdc, sx, sy, None);
+                                let _ = LineTo(hdc, ex, ey);
+                                d += step;
+                            }
+                        }
+                    }
+                    CurveStyle::Arrow => {
+                        let _ = MoveToEx(hdc, x1, y1, None);
+                        let _ = LineTo(hdc, x2, y2);
+                        let angle = f64::from(y2 - y1).atan2(f64::from(x2 - x1));
+                        const HEAD: f64 = 16.0;
+                        let hx1 = (f64::from(x2) - HEAD * (angle - 0.45).cos()).round() as i32;
+                        let hy1 = (f64::from(y2) - HEAD * (angle - 0.45).sin()).round() as i32;
+                        let hx2 = (f64::from(x2) - HEAD * (angle + 0.45).cos()).round() as i32;
+                        let hy2 = (f64::from(y2) - HEAD * (angle + 0.45).sin()).round() as i32;
+                        let _ = MoveToEx(hdc, x2, y2, None);
+                        let _ = LineTo(hdc, hx1, hy1);
+                        let _ = MoveToEx(hdc, x2, y2, None);
+                        let _ = LineTo(hdc, hx2, hy2);
+                    }
+                }
             }
             Some(AnnotateTool::Pencil | AnnotateTool::Marker | AnnotateTool::Eraser)
                 if s.stroke_pts.len() >= 2 => {
@@ -1924,43 +2386,44 @@ unsafe fn draw_live_draft(hdc: HDC, s: &CaptureShared, mon_bounds: PixelRect) {
 }
 
 unsafe fn draw_annotate_toolbar(hdc: HDC, s: &CaptureShared, mon_bounds: PixelRect, font: HFONT) {
+    let dpi = tb_dpi(s);
     let (place, main_w, _) = toolbar_stack_placement(s);
     let mx = (place.left.round() as i32) - mon_bounds.x;
     let my = (place.main_top.round() as i32) - mon_bounds.y;
-    let mh = AnnotateToolbar::HEIGHT as i32;
+    let mh = s_px(AnnotateToolbar::HEIGHT as i32, dpi);
 
     unsafe {
         let bg = CreateSolidBrush(COLORREF(0x00F2_F2F2));
         let border = CreatePen(PS_SOLID, 1, COLORREF(0x00C8_C8C8));
         let ob = SelectObject(hdc, bg.into());
         let op = SelectObject(hdc, border.into());
-        let _ = RoundRect(hdc, mx, my, mx + main_w, my + mh, 4, 4);
+        let r_corner = s_px(6, dpi);
+        let _ = RoundRect(hdc, mx, my, mx + main_w, my + mh, r_corner, r_corner);
         SelectObject(hdc, op);
         SelectObject(hdc, ob);
         let _ = DeleteObject(border.into());
         let _ = DeleteObject(bg.into());
 
-        let mut x = mx + 8;
-        let cell = AnnotateToolbar::CELL as i32;
-        let sep = AnnotateToolbar::SEPARATOR_WIDTH as i32;
-        for &tool in &AnnotateToolbar::ORDER {
-            if matches!(tool, AnnotateTool::Undo | AnnotateTool::Close) {
+        for (tool, rc_virt, sep_x_virt) in toolbar_items(s) {
+            if let Some(sx_v) = sep_x_virt {
+                let sx = sx_v - mon_bounds.x;
                 let sp = CreatePen(PS_SOLID, 1, COLORREF(0x00C8_C8C8));
                 let osp = SelectObject(hdc, sp.into());
-                let _ = MoveToEx(hdc, x + sep / 2, my + 8, None);
-                let _ = LineTo(hdc, x + sep / 2, my + mh - 8);
+                let _ = MoveToEx(hdc, sx, my + s_px(8, dpi), None);
+                let _ = LineTo(hdc, sx, my + mh - s_px(8, dpi));
                 SelectObject(hdc, osp);
                 let _ = DeleteObject(sp.into());
-                x += sep;
             }
 
+            let lx = rc_virt.left - mon_bounds.x;
+            let rx = rc_virt.right - mon_bounds.x;
             if s.hover_tool == Some(tool) {
-                let hb = CreateSolidBrush(COLORREF(0x00E4_E4E4));
+                let hb = CreateSolidBrush(COLORREF(0x00E0_E0E0));
                 let hrc = RECT {
-                    left: x + 1,
-                    top: my + 2,
-                    right: x + cell - 1,
-                    bottom: my + mh - 2,
+                    left: lx + 1,
+                    top: my + s_px(3, dpi),
+                    right: rx - 1,
+                    bottom: my + mh - s_px(3, dpi),
                 };
                 FillRect(hdc, &hrc, hb);
                 let _ = DeleteObject(hb.into());
@@ -1972,139 +2435,178 @@ unsafe fn draw_annotate_toolbar(hdc: HDC, s: &CaptureShared, mon_bounds: PixelRe
                 AnnotateTool::Ocr => !s.ocr_busy,
                 _ => true,
             };
-            draw_tool_glyph(hdc, tool, x + cell / 2, my + mh / 2, enabled, font);
+            draw_tool_glyph(hdc, tool, (lx + rx) / 2, my + mh / 2, dpi, enabled, font);
 
             if s.active_tool == Some(tool) && AnnotateToolbar::shows_selected_dot(tool) {
+                let dot_r = s_px(3, dpi).max(2);
+                let dot_cx = rx - s_px(7, dpi);
+                let dot_cy = my + s_px(7, dpi);
                 let dot_b = CreateSolidBrush(COLORREF(0x0000_00FF));
                 let dot_p = CreatePen(PS_SOLID, 1, COLORREF(0x0000_00FF));
                 let odb = SelectObject(hdc, dot_b.into());
                 let odp = SelectObject(hdc, dot_p.into());
-                let _ = Ellipse(hdc, x + cell - 10, my + 4, x + cell - 4, my + 10);
+                let _ = Ellipse(hdc, dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r);
                 SelectObject(hdc, odp);
                 SelectObject(hdc, odb);
                 let _ = DeleteObject(dot_p.into());
                 let _ = DeleteObject(dot_b.into());
             }
-
-            x += cell;
         }
     }
 }
 
-unsafe fn draw_tool_glyph(hdc: HDC, tool: AnnotateTool, cx: i32, cy: i32, enabled: bool, font: HFONT) {
+unsafe fn draw_tool_glyph(
+    hdc: HDC,
+    tool: AnnotateTool,
+    cx: i32,
+    cy: i32,
+    dpi: u32,
+    enabled: bool,
+    font: HFONT,
+) {
+    let sc = |v: i32| -> i32 { ((v as f64) * (dpi as f64 / 96.0)).round() as i32 };
+    let pen_w = s_px(2, dpi).max(2);
     let ink = if enabled { COLORREF(0x0022_2222) } else { COLORREF(0x00AA_AAAA) };
     unsafe {
-        let pen = CreatePen(PS_SOLID, 2, ink);
+        let pen = CreatePen(PS_SOLID, pen_w, ink);
         let op = SelectObject(hdc, pen.into());
         let ob = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
         match tool {
             AnnotateTool::Shape => {
-                let _ = Rectangle(hdc, cx - 7, cy - 5, cx + 7, cy + 5);
+                let _ = Rectangle(hdc, cx - sc(7), cy - sc(5), cx + sc(7), cy + sc(5));
             }
             AnnotateTool::Curve => {
-                let _ = MoveToEx(hdc, cx - 7, cy + 5, None);
-                let _ = LineTo(hdc, cx + 7, cy - 5);
-                let _ = MoveToEx(hdc, cx + 2, cy - 5, None);
-                let _ = LineTo(hdc, cx + 7, cy - 5);
-                let _ = LineTo(hdc, cx + 7, cy);
+                let _ = MoveToEx(hdc, cx - sc(7), cy + sc(5), None);
+                let _ = LineTo(hdc, cx + sc(7), cy - sc(5));
+                let _ = MoveToEx(hdc, cx + sc(2), cy - sc(5), None);
+                let _ = LineTo(hdc, cx + sc(7), cy - sc(5));
+                let _ = LineTo(hdc, cx + sc(7), cy);
             }
             AnnotateTool::Pencil => {
-                let _ = MoveToEx(hdc, cx - 6, cy + 6, None);
-                let _ = LineTo(hdc, cx + 6, cy - 6);
+                let _ = MoveToEx(hdc, cx - sc(6), cy + sc(6), None);
+                let _ = LineTo(hdc, cx + sc(6), cy - sc(6));
             }
             AnnotateTool::Marker => {
-                let _ = MoveToEx(hdc, cx - 6, cy + 4, None);
-                let _ = LineTo(hdc, cx + 6, cy - 4);
-                let _ = MoveToEx(hdc, cx - 7, cy + 7, None);
-                let _ = LineTo(hdc, cx + 7, cy + 7);
+                let _ = MoveToEx(hdc, cx - sc(6), cy + sc(4), None);
+                let _ = LineTo(hdc, cx + sc(6), cy - sc(4));
+                let _ = MoveToEx(hdc, cx - sc(7), cy + sc(7), None);
+                let _ = LineTo(hdc, cx + sc(7), cy + sc(7));
             }
             AnnotateTool::Mosaic => {
                 for dy in [-4, 1] {
                     for dx in [-4, 1] {
-                        let _ = Rectangle(hdc, cx + dx, cy + dy, cx + dx + 4, cy + dy + 4);
+                        let _ = Rectangle(hdc, cx + sc(dx), cy + sc(dy), cx + sc(dx + 4), cy + sc(dy + 4));
                     }
                 }
+            }
+            AnnotateTool::Number => {
+                let r = sc(8);
+                let _ = Ellipse(hdc, cx - r, cy - r, cx + r + 1, cy + r + 1);
+                let of = SelectObject(hdc, font.into());
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, ink);
+                let mut trc = RECT {
+                    left: cx - r,
+                    top: cy - r,
+                    right: cx + r + 1,
+                    bottom: cy + r + 1,
+                };
+                let mut w: Vec<u16> = "1".encode_utf16().collect();
+                DrawTextW(hdc, &mut w, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                SelectObject(hdc, of);
             }
             AnnotateTool::Text => {
                 let of = SelectObject(hdc, font.into());
                 SetBkMode(hdc, TRANSPARENT);
                 SetTextColor(hdc, ink);
-                let w: Vec<u16> = "T".encode_utf16().collect();
-                let _ = TextOutW(hdc, cx - 4, cy - 7, &w);
+                let mut trc = RECT {
+                    left: cx - sc(10),
+                    top: cy - sc(10),
+                    right: cx + sc(10),
+                    bottom: cy + sc(10),
+                };
+                let mut w: Vec<u16> = "T".encode_utf16().collect();
+                DrawTextW(hdc, &mut w, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 SelectObject(hdc, of);
             }
             AnnotateTool::Ocr => {
                 let of = SelectObject(hdc, font.into());
                 SetBkMode(hdc, TRANSPARENT);
                 SetTextColor(hdc, ink);
-                let w: Vec<u16> = "文".encode_utf16().collect();
-                let _ = TextOutW(hdc, cx - 7, cy - 7, &w);
+                let mut trc = RECT {
+                    left: cx - sc(11),
+                    top: cy - sc(10),
+                    right: cx + sc(11),
+                    bottom: cy + sc(10),
+                };
+                let mut w: Vec<u16> = "文".encode_utf16().collect();
+                DrawTextW(hdc, &mut w, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 SelectObject(hdc, of);
             }
             AnnotateTool::Pick => {
-                let _ = Ellipse(hdc, cx - 6, cy - 6, cx + 6, cy + 6);
-                let _ = MoveToEx(hdc, cx - 2, cy, None);
-                let _ = LineTo(hdc, cx + 3, cy);
-                let _ = MoveToEx(hdc, cx, cy - 2, None);
-                let _ = LineTo(hdc, cx, cy + 3);
+                let _ = Ellipse(hdc, cx - sc(6), cy - sc(6), cx + sc(6), cy + sc(6));
+                let _ = MoveToEx(hdc, cx - sc(2), cy, None);
+                let _ = LineTo(hdc, cx + sc(3), cy);
+                let _ = MoveToEx(hdc, cx, cy - sc(2), None);
+                let _ = LineTo(hdc, cx, cy + sc(3));
             }
             AnnotateTool::Eraser => {
                 let _ = Polygon(
                     hdc,
                     &[
-                        POINT { x: cx - 6, y: cy + 2 },
-                        POINT { x: cx, y: cy - 6 },
-                        POINT { x: cx + 7, y: cy - 1 },
-                        POINT { x: cx + 1, y: cy + 6 },
+                        POINT { x: cx - sc(6), y: cy + sc(2) },
+                        POINT { x: cx, y: cy - sc(6) },
+                        POINT { x: cx + sc(7), y: cy - sc(1) },
+                        POINT { x: cx + sc(1), y: cy + sc(6) },
                     ],
                 );
             }
             AnnotateTool::Undo => {
-                let _ = MoveToEx(hdc, cx + 6, cy + 4, None);
-                let _ = LineTo(hdc, cx + 6, cy - 2);
-                let _ = LineTo(hdc, cx - 5, cy - 2);
-                let _ = LineTo(hdc, cx - 1, cy - 6);
-                let _ = MoveToEx(hdc, cx - 5, cy - 2, None);
-                let _ = LineTo(hdc, cx - 1, cy + 2);
+                let _ = MoveToEx(hdc, cx + sc(6), cy + sc(4), None);
+                let _ = LineTo(hdc, cx + sc(6), cy - sc(2));
+                let _ = LineTo(hdc, cx - sc(5), cy - sc(2));
+                let _ = LineTo(hdc, cx - sc(1), cy - sc(6));
+                let _ = MoveToEx(hdc, cx - sc(5), cy - sc(2), None);
+                let _ = LineTo(hdc, cx - sc(1), cy + sc(2));
             }
             AnnotateTool::Redo => {
-                let _ = MoveToEx(hdc, cx - 6, cy + 4, None);
-                let _ = LineTo(hdc, cx - 6, cy - 2);
-                let _ = LineTo(hdc, cx + 5, cy - 2);
-                let _ = LineTo(hdc, cx + 1, cy - 6);
-                let _ = MoveToEx(hdc, cx + 5, cy - 2, None);
-                let _ = LineTo(hdc, cx + 1, cy + 2);
+                let _ = MoveToEx(hdc, cx - sc(6), cy + sc(4), None);
+                let _ = LineTo(hdc, cx - sc(6), cy - sc(2));
+                let _ = LineTo(hdc, cx + sc(5), cy - sc(2));
+                let _ = LineTo(hdc, cx + sc(1), cy - sc(6));
+                let _ = MoveToEx(hdc, cx + sc(5), cy - sc(2), None);
+                let _ = LineTo(hdc, cx + sc(1), cy + sc(2));
             }
             AnnotateTool::Close => {
-                let rp = CreatePen(PS_SOLID, 2, COLORREF(0x0028_28DC));
+                let rp = CreatePen(PS_SOLID, pen_w, COLORREF(0x0028_28DC));
                 let _ = SelectObject(hdc, rp.into());
-                let _ = MoveToEx(hdc, cx - 5, cy - 5, None);
-                let _ = LineTo(hdc, cx + 6, cy + 6);
-                let _ = MoveToEx(hdc, cx + 5, cy - 5, None);
-                let _ = LineTo(hdc, cx - 6, cy + 6);
+                let _ = MoveToEx(hdc, cx - sc(5), cy - sc(5), None);
+                let _ = LineTo(hdc, cx + sc(6), cy + sc(6));
+                let _ = MoveToEx(hdc, cx + sc(5), cy - sc(5), None);
+                let _ = LineTo(hdc, cx - sc(6), cy + sc(6));
                 let _ = SelectObject(hdc, pen.into());
                 let _ = DeleteObject(rp.into());
             }
             AnnotateTool::Pin => {
-                let _ = Rectangle(hdc, cx - 5, cy - 6, cx + 5, cy);
+                let _ = Rectangle(hdc, cx - sc(5), cy - sc(6), cx + sc(5), cy);
                 let _ = MoveToEx(hdc, cx, cy, None);
-                let _ = LineTo(hdc, cx, cy + 7);
+                let _ = LineTo(hdc, cx, cy + sc(7));
             }
             AnnotateTool::Save => {
-                let _ = MoveToEx(hdc, cx, cy - 6, None);
-                let _ = LineTo(hdc, cx, cy + 3);
-                let _ = LineTo(hdc, cx - 4, cy - 1);
-                let _ = MoveToEx(hdc, cx, cy + 3, None);
-                let _ = LineTo(hdc, cx + 4, cy - 1);
-                let _ = MoveToEx(hdc, cx - 6, cy + 6, None);
-                let _ = LineTo(hdc, cx + 6, cy + 6);
+                let _ = MoveToEx(hdc, cx, cy - sc(6), None);
+                let _ = LineTo(hdc, cx, cy + sc(3));
+                let _ = LineTo(hdc, cx - sc(4), cy - sc(1));
+                let _ = MoveToEx(hdc, cx, cy + sc(3), None);
+                let _ = LineTo(hdc, cx + sc(4), cy - sc(1));
+                let _ = MoveToEx(hdc, cx - sc(6), cy + sc(6), None);
+                let _ = LineTo(hdc, cx + sc(6), cy + sc(6));
             }
             AnnotateTool::Copy => {
-                let gp = CreatePen(PS_SOLID, 2, COLORREF(0x00F0_8020));
+                let gp = CreatePen(PS_SOLID, pen_w, COLORREF(0x00F0_8020));
                 let _ = SelectObject(hdc, gp.into());
-                let _ = MoveToEx(hdc, cx - 6, cy, None);
-                let _ = LineTo(hdc, cx - 1, cy + 5);
-                let _ = LineTo(hdc, cx + 7, cy - 5);
+                let _ = MoveToEx(hdc, cx - sc(6), cy, None);
+                let _ = LineTo(hdc, cx - sc(1), cy + sc(5));
+                let _ = LineTo(hdc, cx + sc(7), cy - sc(5));
                 let _ = SelectObject(hdc, pen.into());
                 let _ = DeleteObject(gp.into());
             }
@@ -2122,17 +2624,22 @@ unsafe fn draw_annotate_subbar(hdc: HDC, s: &CaptureShared, mon_bounds: PixelRec
     if !AnnotateToolbar::shows_property_bar(tool) {
         return;
     }
-    let (place, _, sub_w) = toolbar_stack_placement(s);
-    let sx = (place.left.round() as i32) - mon_bounds.x;
-    let sy = (place.sub_top.round() as i32) - mon_bounds.y;
-    let sh = AnnotateToolbar::SUB_BAR_HEIGHT as i32;
+    let dpi = tb_dpi(s);
+    let (place, _, _) = toolbar_stack_placement(s);
+    let sx_v = place.left.round() as i32;
+    let sy_v = place.sub_top.round() as i32;
+    let (items, sub_w) = build_subbar_items(s, tool, sx_v, sy_v, dpi);
+    let sx = sx_v - mon_bounds.x;
+    let sy = sy_v - mon_bounds.y;
+    let sh = s_px(AnnotateToolbar::SUB_BAR_HEIGHT as i32, dpi);
 
     unsafe {
         let bg = CreateSolidBrush(COLORREF(0x002B_2B2B));
         let bd = CreatePen(PS_SOLID, 1, COLORREF(0x001A_1A1A));
         let ob = SelectObject(hdc, bg.into());
         let op = SelectObject(hdc, bd.into());
-        let _ = RoundRect(hdc, sx, sy, sx + sub_w, sy + sh, 4, 4);
+        let r_corner = s_px(6, dpi);
+        let _ = RoundRect(hdc, sx, sy, sx + sub_w, sy + sh, r_corner, r_corner);
         SelectObject(hdc, op);
         SelectObject(hdc, ob);
         let _ = DeleteObject(bd.into());
@@ -2140,75 +2647,182 @@ unsafe fn draw_annotate_subbar(hdc: HDC, s: &CaptureShared, mon_bounds: PixelRec
 
         let of = SelectObject(hdc, font.into());
         SetBkMode(hdc, TRANSPARENT);
-        let mut x = sx + 8;
 
-        let draw_chip = |label: &str, cx: i32, w: i32, active: bool| {
-            let fill = if active { COLORREF(0x0055_5555) } else { COLORREF(0x003A_3A3A) };
-            let br = CreateSolidBrush(fill);
-            let rc = RECT {
-                left: cx,
-                top: sy + 6,
-                right: cx + w,
-                bottom: sy + sh - 6,
+        for it in items {
+            let lrc = RECT {
+                left: it.rect.left - mon_bounds.x,
+                top: it.rect.top - mon_bounds.y,
+                right: it.rect.right - mon_bounds.x,
+                bottom: it.rect.bottom - mon_bounds.y,
             };
-            FillRect(hdc, &rc, br);
-            let _ = DeleteObject(br.into());
-            SetTextColor(hdc, COLORREF(0x00EE_EEEE));
-            let wt: Vec<u16> = label.encode_utf16().collect();
-            let _ = TextOutW(hdc, cx + 6, sy + 9, &wt);
-        };
-
-        match tool {
-            AnnotateTool::Shape => {
-                draw_chip("矩形", x, 40, !s.ellipse_mode);
-                x += 44;
-                draw_chip("椭圆", x, 40, s.ellipse_mode);
-                x += 48;
-            }
-            AnnotateTool::Curve => {
-                draw_chip("直线", x, 36, s.curve_style == CurveStyle::Solid);
-                x += 40;
-                draw_chip("虚线", x, 36, s.curve_style == CurveStyle::Dashed);
-                x += 40;
-                draw_chip("箭头", x, 36, s.curve_style == CurveStyle::Arrow);
-                x += 44;
-            }
-            _ => {}
-        }
-
-        let (chips, current_val): (&[i32], i32) = match tool {
-            AnnotateTool::Marker => (&AnnotateToolbar::MARKER_THICKNESS_CHIPS, s.marker_thickness),
-            AnnotateTool::Mosaic => (&AnnotateToolbar::MOSAIC_RADIUS_CHIPS, s.mosaic_radius),
-            AnnotateTool::Eraser => (&AnnotateToolbar::ERASER_THICKNESS_CHIPS, s.eraser_thickness),
-            AnnotateTool::Text => (&AnnotateToolbar::TEXT_SIZE_CHIPS, s.text_size),
-            _ => (&AnnotateToolbar::THICKNESS_CHIPS, s.stroke_thickness),
-        };
-        for &c in chips {
-            draw_chip(&c.to_string(), x, 28, c == current_val);
-            x += 32;
-        }
-
-        if !matches!(tool, AnnotateTool::Mosaic | AnnotateTool::Eraser) {
-            x += 8;
-            for &(r, g, b) in &AnnotateToolbar::PALETTE {
+            let hovered = s.hover_sub.as_ref() == Some(&it.hit);
+            if let Some((b, g, r)) = it.swatch_bgr {
                 let cr = COLORREF(u32::from(r) | (u32::from(g) << 8) | (u32::from(b) << 16));
-                let active = s.color_bgr == (b, g, r);
                 let sbr = CreateSolidBrush(cr);
                 let spen = CreatePen(
                     PS_SOLID,
-                    if active { 2 } else { 1 },
-                    if active { COLORREF(0x00FF_FFFF) } else { COLORREF(0x0066_6666) },
+                    if it.active || hovered { 2 } else { 1 },
+                    if it.active || hovered {
+                        COLORREF(0x00FF_FFFF)
+                    } else {
+                        COLORREF(0x0066_6666)
+                    },
                 );
                 let osb = SelectObject(hdc, sbr.into());
                 let osp = SelectObject(hdc, spen.into());
-                let _ = Rectangle(hdc, x, sy + 8, x + 20, sy + sh - 8);
+                let _ = Rectangle(hdc, lrc.left, lrc.top, lrc.right, lrc.bottom);
                 SelectObject(hdc, osp);
                 SelectObject(hdc, osb);
                 let _ = DeleteObject(spen.into());
                 let _ = DeleteObject(sbr.into());
-                x += 24;
+            } else {
+                let fill = if it.active {
+                    COLORREF(0x005E_5E5E)
+                } else if hovered {
+                    COLORREF(0x004A_4A4A)
+                } else {
+                    COLORREF(0x0038_3838)
+                };
+                let br = CreateSolidBrush(fill);
+                FillRect(hdc, &lrc, br);
+                let _ = DeleteObject(br.into());
+                SetTextColor(hdc, COLORREF(0x00EE_EEEE));
+                let txt = match it.hit {
+                    SubHit::SizeChip(v) => v.to_string(),
+                    _ => it.label.to_string(),
+                };
+                let mut wt: Vec<u16> = txt.encode_utf16().collect();
+                let mut trc = lrc;
+                DrawTextW(hdc, &mut wt, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
         }
+        SelectObject(hdc, of);
+    }
+}
+
+unsafe fn draw_hover_tooltip(
+    hdc: HDC,
+    s: &CaptureShared,
+    mon_bounds: PixelRect,
+    _cw: i32,
+    _ch: i32,
+    font: HFONT,
+) {
+    if s.drawing_stroke || s.resizing || s.moving_sel || !s.text_edit.is_invalid() {
+        return;
+    }
+    let dpi = tb_dpi(s);
+    let (place, _, _) = toolbar_stack_placement(s);
+    let main_h = f64::from(s_px(AnnotateToolbar::HEIGHT as i32, dpi));
+    let sub_h = f64::from(s_px(AnnotateToolbar::SUB_BAR_HEIGHT as i32, dpi));
+
+    let tip_spec: Option<(String, RECT, bool, f64, f64, bool)> = if let Some(tool) = s.hover_tool {
+        let rc_v = toolbar_items(s)
+            .into_iter()
+            .find(|(t, _, _)| *t == tool)
+            .map(|(_, rc, _)| rc);
+        rc_v.map(|rc| {
+            let prefer_below = if place.sub_visible {
+                place.sub_top < place.main_top
+            } else {
+                !place.above
+            };
+            (
+                AnnotateToolbar::tooltip_with_shortcut(tool).to_string(),
+                rc,
+                prefer_below,
+                place.sub_top,
+                place.sub_top + sub_h,
+                place.sub_visible,
+            )
+        })
+    } else if let Some(ref hit) = s.hover_sub
+        && let Some(tool) = s.active_tool
+        && AnnotateToolbar::shows_property_bar(tool)
+    {
+        let (items, _) =
+            build_subbar_items(s, tool, place.left.round() as i32, place.sub_top.round() as i32, dpi);
+        items.into_iter().find(|it| &it.hit == hit).map(|it| {
+            let txt = match hit {
+                SubHit::ShapeRect => "矩形边框".to_string(),
+                SubHit::ShapeEllipse => "椭圆边框".to_string(),
+                SubHit::CurveStyle(CurveStyle::Solid) => "直线".to_string(),
+                SubHit::CurveStyle(CurveStyle::Dashed) => "虚线".to_string(),
+                SubHit::CurveStyle(CurveStyle::Arrow) => "箭头".to_string(),
+                SubHit::MosaicPixel => "方块马赛克".to_string(),
+                SubHit::MosaicBlur => "柔和模糊".to_string(),
+                SubHit::SizeChip(v) => format!("大小 / 粗细: {v} px (滚轮可调)"),
+                SubHit::Swatch(idx) => {
+                    const NAMES: [&str; 6] = ["青色", "绿色", "黄色", "灰色", "白色", "红色"];
+                    NAMES.get(*idx).copied().unwrap_or("颜色").to_string()
+                }
+            };
+            (
+                txt,
+                it.rect,
+                place.sub_top >= place.main_top,
+                place.main_top,
+                place.main_top + main_h,
+                true,
+            )
+        })
+    } else {
+        None
+    };
+
+    let Some((text, anchor_v, prefer_below, avoid_top, avoid_bot, avoid_active)) = tip_spec else {
+        return;
+    };
+
+    let wt: Vec<u16> = text.encode_utf16().collect();
+    unsafe {
+        let of = SelectObject(hdc, font.into());
+        let mut sz = SIZE::default();
+        let _ = GetTextExtentPoint32W(hdc, &wt, &mut sz);
+        let tip_w = (sz.cx + s_px(18, dpi)).max(s_px(44, dpi));
+        let tip_h = (sz.cy + s_px(10, dpi)).max(s_px(24, dpi));
+        let anchor_cx = f64::from(anchor_v.left + anchor_v.right) / 2.0;
+
+        let (vx, vy) = AnnotateToolbar::place_tooltip(
+            anchor_cx,
+            f64::from(anchor_v.top),
+            f64::from(anchor_v.bottom),
+            f64::from(tip_w),
+            f64::from(tip_h),
+            prefer_below,
+            avoid_top,
+            avoid_bot,
+            avoid_active,
+            f64::from(mon_bounds.x),
+            f64::from(mon_bounds.y),
+            f64::from(mon_bounds.right()),
+            f64::from(mon_bounds.bottom()),
+            f64::from(s_px(6, dpi)),
+        );
+
+        let tx = (vx.round() as i32) - mon_bounds.x;
+        let ty = (vy.round() as i32) - mon_bounds.y;
+        let bg = CreateSolidBrush(COLORREF(0x001E_1E1E));
+        let bd = CreatePen(PS_SOLID, 1, COLORREF(0x005A_5A5A));
+        let ob = SelectObject(hdc, bg.into());
+        let op = SelectObject(hdc, bd.into());
+        let rad = s_px(6, dpi);
+        let _ = RoundRect(hdc, tx, ty, tx + tip_w, ty + tip_h, rad, rad);
+        SelectObject(hdc, op);
+        SelectObject(hdc, ob);
+        let _ = DeleteObject(bd.into());
+        let _ = DeleteObject(bg.into());
+
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, COLORREF(0x00FF_FFFF));
+        let mut trc = RECT {
+            left: tx,
+            top: ty,
+            right: tx + tip_w,
+            bottom: ty + tip_h,
+        };
+        let mut wt_mut = wt;
+        DrawTextW(hdc, &mut wt_mut, &mut trc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SelectObject(hdc, of);
     }
 }

@@ -21,6 +21,7 @@ pub const WM_APP_SETTINGS_CLOSED: u32 = WM_APP + 14;
 pub const WM_APP_HISTORY_CLOSED: u32 = WM_APP + 15;
 pub const WM_APP_PIN_CHANGED: u32 = WM_APP + 16;
 pub const WM_APP_PIN_MANAGE_CLOSED: u32 = WM_APP + 17;
+pub const WM_APP_TRAY_BALLOON: u32 = WM_APP + 18;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
@@ -49,6 +50,8 @@ pub enum AppCommand {
     TogglePinThrough = 1022,
     ClosePin = 1023,
     CloseAllPins = 1024,
+    DelayedCapture = 1025,
+    TogglePinsVisible = 1026,
 }
 
 impl AppCommand {
@@ -78,9 +81,16 @@ impl AppCommand {
             1022 => Some(Self::TogglePinThrough),
             1023 => Some(Self::ClosePin),
             1024 => Some(Self::CloseAllPins),
+            1025 => Some(Self::DelayedCapture),
+            1026 => Some(Self::TogglePinsVisible),
             _ => None,
         }
     }
+}
+
+pub struct TrayBalloonMsg {
+    pub title: String,
+    pub text: String,
 }
 
 pub struct TaskbarFxApplyMsg {

@@ -33,19 +33,19 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PCWSTR;
 
-use crate::capture_ui::CaptureSession;
+use crate::capture_ui::{CaptureSession, CaptureToolPrefs};
 use crate::color_pick_ui::ColorPickSession;
 use crate::d2d::D2dRenderer;
 use crate::history_ui::HistoryWindow;
 use crate::hotkeys::HotKeyHost;
 use crate::messages::{
     AppCommand, CaptureDoneMsg, ColorPickDoneMsg, NetSpeedPosMsg, OcrDoneMsg, ScrollPickMsg,
-    TaskbarFxApplyMsg, UpdateCheckResult, WM_APP_CAPTURE_DONE, WM_APP_COLOR_PICK_DONE,
-    WM_APP_COMMAND, WM_APP_HISTORY_CLOSED, WM_APP_NETSPEED_POS, WM_APP_NETSPEED_SAMPLE,
-    WM_APP_OCR_DONE, WM_APP_PIN_CHANGED, WM_APP_PIN_MANAGE_CLOSED, WM_APP_SCROLL_DONE,
-    WM_APP_SCROLL_PICKED, WM_APP_SCROLL_PROGRESS, WM_APP_SETTINGS_APPLY, WM_APP_SETTINGS_CLOSED,
-    WM_APP_TASKBAR_FX_RESULT, WM_APP_TRAY_CALLBACK, WM_APP_UPDATE_CHECK_DONE, post_boxed,
-    take_boxed,
+    TaskbarFxApplyMsg, TrayBalloonMsg, UpdateCheckResult, WM_APP_CAPTURE_DONE,
+    WM_APP_COLOR_PICK_DONE, WM_APP_COMMAND, WM_APP_HISTORY_CLOSED, WM_APP_NETSPEED_POS,
+    WM_APP_NETSPEED_SAMPLE, WM_APP_OCR_DONE, WM_APP_PIN_CHANGED, WM_APP_PIN_MANAGE_CLOSED,
+    WM_APP_SCROLL_DONE, WM_APP_SCROLL_PICKED, WM_APP_SCROLL_PROGRESS, WM_APP_SETTINGS_APPLY,
+    WM_APP_SETTINGS_CLOSED, WM_APP_TASKBAR_FX_RESULT, WM_APP_TRAY_BALLOON, WM_APP_TRAY_CALLBACK,
+    WM_APP_UPDATE_CHECK_DONE, post_boxed, take_boxed,
 };
 use crate::netspeed_ui::{NetSpeedFloatWindow, NetSpeedTrayWidget};
 use crate::pin_ui::{PinManageWindow, PinboardService};
@@ -59,6 +59,7 @@ const CONTROLLER_CLASS: &str = "SuiteControllerWnd";
 const TIMER_TRAY_WATCH: usize = 101;
 const TIMER_SMOKE_EXIT: usize = 102;
 const TIMER_SHUTDOWN_QUIT: usize = 103;
+const TIMER_DELAYED_CAPTURE: usize = 104;
 const WM_CONTEXTMENU_NOTIFY: u32 = 0x007B;
 const WM_USER_NOTIFY_OPEN: u32 = 0x0402;
 const PBT_APMRESUMESUSPEND: usize = 0x0007;
@@ -99,6 +100,8 @@ struct ControllerCore {
     netspeed_float: NetSpeedFloatWindow,
     pins: RefCell<PinboardService>,
 
+    capture_prefs: Rc<RefCell<CaptureToolPrefs>>,
+    delayed_capture_pending: Cell<bool>,
     capture_session: RefCell<Option<CaptureSession>>,
     color_pick_session: RefCell<Option<ColorPickSession>>,
     scroll_session: RefCell<Option<ScrollCaptureSession>>,
@@ -193,6 +196,8 @@ impl AppController {
             netspeed_secondary_trays: RefCell::new(Vec::new()),
             netspeed_float,
             pins: RefCell::new(pins),
+            capture_prefs: Rc::new(RefCell::new(CaptureToolPrefs::default())),
+            delayed_capture_pending: Cell::new(false),
             capture_session: RefCell::new(None),
             color_pick_session: RefCell::new(None),
             scroll_session: RefCell::new(None),
@@ -484,9 +489,16 @@ fn request_apply_taskbar_fx_core(
 }
 
 fn sync_pin_tray_and_manage_core(core: &ControllerCore) {
-    let list = core.pins.borrow_mut().list();
+    let (list, pin_count, pins_hidden) = {
+        let mut pins = core.pins.borrow_mut();
+        let list = pins.list();
+        let (cnt, hid) = pins.pin_count_and_hidden();
+        (list, cnt, hid)
+    };
     let any_through = list.iter().any(|p| p.is_click_through);
-    core.tray.borrow_mut().set_click_through_available(any_through);
+    core.tray
+        .borrow_mut()
+        .set_pin_state(pin_count, pins_hidden, any_through);
     if let Some(ref pm) = *core.pin_manage_win.borrow() {
         pm.reload(&list);
     }
@@ -586,6 +598,7 @@ fn start_capture_core(core: &ControllerCore) {
         pin_after,
         show_mag,
         save_dir,
+        Rc::clone(&core.capture_prefs),
     ) {
         Ok(sess) => {
             *core.capture_session.borrow_mut() = Some(sess);
@@ -709,6 +722,7 @@ fn shutdown_core(core: &ControllerCore) {
         unsafe {
             let _ = KillTimer(Some(hwnd), TIMER_TRAY_WATCH);
             let _ = KillTimer(Some(hwnd), TIMER_SMOKE_EXIT);
+            let _ = KillTimer(Some(hwnd), TIMER_DELAYED_CAPTURE);
         }
     }
 
@@ -800,7 +814,32 @@ fn handle_command(core: &Rc<ControllerCore>, cmd: AppCommand, lparam: LPARAM) {
                 sw.reload(&updated, &adapters, &lbl);
             }
         }
-        AppCommand::Capture => start_capture_core(core),
+        AppCommand::Capture => {
+            if core.delayed_capture_pending.replace(false) {
+                unsafe {
+                    let _ = KillTimer(Some(core.hwnd.get()), TIMER_DELAYED_CAPTURE);
+                }
+            }
+            start_capture_core(core);
+        }
+        AppCommand::DelayedCapture => {
+            let hwnd = core.hwnd.get();
+            if core.delayed_capture_pending.get() {
+                core.delayed_capture_pending.set(false);
+                unsafe {
+                    let _ = KillTimer(Some(hwnd), TIMER_DELAYED_CAPTURE);
+                }
+                core.tray.borrow().balloon("延时截图", "已取消延时截图。");
+            } else {
+                core.delayed_capture_pending.set(true);
+                unsafe {
+                    let _ = SetTimer(Some(hwnd), TIMER_DELAYED_CAPTURE, 3000, None);
+                }
+                core.tray
+                    .borrow()
+                    .balloon("延时截图", "3 秒后自动开始区域截图，请切换到目标界面…");
+            }
+        }
         AppCommand::ScrollCapture => start_scroll_capture_core(core),
         AppCommand::ColorPick => start_color_pick_core(core),
         AppCommand::History => {
@@ -993,6 +1032,14 @@ fn handle_command(core: &Rc<ControllerCore>, cmd: AppCommand, lparam: LPARAM) {
         AppCommand::CloseAllPins => {
             core.pins.borrow_mut().close_all();
             sync_pin_tray_and_manage_core(core);
+        }
+        AppCommand::TogglePinsVisible => {
+            let hidden = core.pins.borrow_mut().toggle_all_visible();
+            sync_pin_tray_and_manage_core(core);
+            core.tray.borrow().balloon(
+                "贴图",
+                if hidden { "已隐藏全部贴图（可从托盘菜单恢复）。" } else { "已显示全部贴图。" },
+            );
         }
     }
 }
@@ -1234,9 +1281,17 @@ unsafe extern "system" fn controller_wnd_proc(
                     if done.save_requested || settings.capture.save_file_after_capture {
                         let dir_opt = (!settings.capture.save_directory.trim().is_empty())
                             .then_some(settings.capture.save_directory.as_str());
-                        if let Err(err) = save_png_atomic(&img, dir_opt) {
-                            SuiteLog::error("SaveCapturePng", &err);
-                            core.tray.borrow().balloon("保存截图失败", &err);
+                        match save_png_atomic(&img, dir_opt) {
+                            Ok(path) if done.save_requested => {
+                                core.tray
+                                    .borrow()
+                                    .balloon("截图已保存并复制", &path.to_string_lossy());
+                            }
+                            Ok(_) => {}
+                            Err(err) => {
+                                SuiteLog::error("SaveCapturePng", &err);
+                                core.tray.borrow().balloon("保存截图失败", &err);
+                            }
                         }
                     }
                     if done.pin_requested || settings.capture.pin_after_capture {
@@ -1355,6 +1410,12 @@ unsafe extern "system" fn controller_wnd_proc(
             *core.pin_manage_win.borrow_mut() = None;
             LRESULT(0)
         }
+        WM_APP_TRAY_BALLOON => {
+            if let Some(msg) = unsafe { take_boxed::<TrayBalloonMsg>(lparam) } {
+                core.tray.borrow().balloon(&msg.title, &msg.text);
+            }
+            LRESULT(0)
+        }
         WM_SETTINGCHANGE => {
             sync_theme_core(&core, None);
             LRESULT(0)
@@ -1391,6 +1452,12 @@ unsafe extern "system" fn controller_wnd_proc(
                 unsafe {
                     let _ = PostMessageW(Some(hwnd), WM_APP_SMOKE_DONE, WPARAM(0), LPARAM(0));
                 }
+            } else if tid == TIMER_DELAYED_CAPTURE {
+                unsafe {
+                    let _ = KillTimer(Some(hwnd), TIMER_DELAYED_CAPTURE);
+                }
+                core.delayed_capture_pending.set(false);
+                start_capture_core(&core);
             }
             LRESULT(0)
         }

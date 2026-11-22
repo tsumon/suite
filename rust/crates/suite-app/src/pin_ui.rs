@@ -1,7 +1,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use suite_capture::{ImageClipboard, MonitorEnumerator, PixelBuffer, save_png_atomic};
+use suite_capture::{ImageClipboard, MonitorEnumerator, PixelBuffer, WindowsOcr};
 use suite_contracts::ThemeKind;
 use suite_platform::{PersonalizeRegistry, TaskbarEmbed, constants::to_wide_null};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -10,7 +13,8 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::HiDpi::AdjustWindowRectExForDpi;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_DELETE, VK_ESCAPE, VK_MENU,
+    GetKeyState, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_CONTROL, VK_DELETE, VK_ESCAPE,
+    VK_MENU,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
@@ -29,7 +33,10 @@ use windows::core::PCWSTR;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
 use crate::d2d::D2dRenderer;
-use crate::messages::{AppCommand, WM_APP_PIN_CHANGED, WM_APP_PIN_MANAGE_CLOSED, post_command};
+use crate::messages::{
+    AppCommand, TrayBalloonMsg, WM_APP_PIN_CHANGED, WM_APP_PIN_MANAGE_CLOSED, WM_APP_TRAY_BALLOON,
+    post_boxed, post_command,
+};
 use crate::win32_util::{
     apply_control_theme, apply_window_theme, centered_origin_on_cursor_monitor, confirm_warning,
     create_ui_font, dpi_for_cursor, hinstance, invalidate_all, register_window_class, s_px,
@@ -58,12 +65,16 @@ struct PinInner {
     base_w_dip: f64,
     base_h_dip: f64,
     scale: f64,
+    saved_scale: f64,
+    collapsed: bool,
     opacity: f32,
     phase: f32,
     hovered: bool,
     tracking_leave: bool,
     click_through: bool,
     theme: ThemeKind,
+    last_lbtn_down: Option<(Instant, i32, i32)>,
+    ocr_busy: Arc<AtomicBool>,
 }
 
 pub struct PinWindow {
@@ -80,7 +91,7 @@ impl PinWindow {
         dpi: (u32, u32),
         theme: ThemeKind,
     ) -> Option<Rc<Self>> {
-        register_window_class(PIN_WND_CLASS, Some(pin_wnd_proc), false, None);
+        register_window_class(PIN_WND_CLASS, Some(pin_wnd_proc), true, None);
         let dx = dpi.0.max(96) as f64;
         let dy = dpi.1.max(96) as f64;
         let base_w_dip = (image.width as f64 * 96.0 / dx).max(1.0);
@@ -102,12 +113,16 @@ impl PinWindow {
             base_w_dip,
             base_h_dip,
             scale: 1.0,
+            saved_scale: 1.0,
+            collapsed: false,
             opacity: 1.0,
             phase: 0.0,
             hovered: false,
             tracking_leave: false,
             click_through: false,
             theme,
+            last_lbtn_down: None,
+            ocr_busy: Arc::new(AtomicBool::new(false)),
         }));
 
         let cls = to_wide_null(PIN_WND_CLASS);
@@ -186,6 +201,7 @@ impl PinWindow {
         let hwnd = self.inner.borrow().hwnd;
         if !hwnd.is_invalid() {
             unsafe {
+                let _ = ShowWindow(hwnd, SW_SHOW);
                 let _ = SetWindowPos(
                     hwnd,
                     Some(HWND_TOPMOST),
@@ -196,6 +212,15 @@ impl PinWindow {
                     SWP_NOMOVE | SWP_NOSIZE,
                 );
                 let _ = SetForegroundWindow(hwnd);
+            }
+        }
+    }
+
+    pub fn set_visible(&self, visible: bool) {
+        let hwnd = self.inner.borrow().hwnd;
+        if !hwnd.is_invalid() {
+            unsafe {
+                let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
             }
         }
     }
@@ -355,8 +380,31 @@ unsafe extern "system" fn pin_wnd_proc(
         WM_LBUTTONDOWN => {
             let ct = inner_rc.borrow().click_through;
             if !ct {
+                let mut pt = POINT::default();
                 unsafe {
-                    let _ = PostMessageW(Some(hwnd), WM_NCLBUTTONDOWN, WPARAM(HTCAPTION as usize), lparam);
+                    let _ = GetCursorPos(&mut pt);
+                }
+                let is_dbl = {
+                    let mut st = inner_rc.borrow_mut();
+                    let matched = st.last_lbtn_down.is_some_and(|(t, lx, ly)| {
+                        t.elapsed() <= Duration::from_millis(450)
+                            && (pt.x - lx).abs() <= 6
+                            && (pt.y - ly).abs() <= 6
+                    });
+                    if matched {
+                        st.last_lbtn_down = None;
+                        true
+                    } else {
+                        st.last_lbtn_down = Some((Instant::now(), pt.x, pt.y));
+                        false
+                    }
+                };
+                if is_dbl {
+                    toggle_thumbnail_collapse(&inner_rc);
+                } else {
+                    unsafe {
+                        let _ = PostMessageW(Some(hwnd), WM_NCLBUTTONDOWN, WPARAM(HTCAPTION as usize), lparam);
+                    }
                 }
             }
             LRESULT(0)
@@ -421,13 +469,32 @@ unsafe extern "system" fn pin_wnd_proc(
         WM_KEYDOWN => {
             let vk = wparam.0 as u16;
             let ct = inner_rc.borrow().click_through;
-            if !ct && (vk == VK_ESCAPE.0 || vk == VK_DELETE.0) {
-                let controller = inner_rc.borrow().controller;
-                unsafe {
-                    let _ = DestroyWindow(hwnd);
-                    let _ = PostMessageW(Some(controller), WM_APP_PIN_CHANGED, WPARAM(0), LPARAM(0));
+            if !ct {
+                let ctrl = unsafe { GetKeyState(i32::from(VK_CONTROL.0)) } < 0;
+                if vk == VK_ESCAPE.0 || vk == VK_DELETE.0 {
+                    let controller = inner_rc.borrow().controller;
+                    unsafe {
+                        let _ = DestroyWindow(hwnd);
+                        let _ = PostMessageW(Some(controller), WM_APP_PIN_CHANGED, WPARAM(0), LPARAM(0));
+                    }
+                    return LRESULT(0);
                 }
-                return LRESULT(0);
+                if ctrl && vk == b'C' as u16 {
+                    copy_pin_image(&inner_rc);
+                    return LRESULT(0);
+                }
+                if ctrl && vk == b'S' as u16 {
+                    save_pin_image(hwnd, &inner_rc);
+                    return LRESULT(0);
+                }
+                if !ctrl && vk == b'R' as u16 {
+                    reset_pin_scale(&inner_rc);
+                    return LRESULT(0);
+                }
+                if !ctrl && vk == b'O' as u16 {
+                    trigger_pin_ocr(&inner_rc);
+                    return LRESULT(0);
+                }
             }
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
@@ -449,8 +516,115 @@ unsafe extern "system" fn pin_wnd_proc(
     }
 }
 
+fn post_pin_balloon(controller: HWND, title: &str, text: &str) {
+    post_boxed(
+        controller,
+        WM_APP_TRAY_BALLOON,
+        0,
+        TrayBalloonMsg {
+            title: title.to_string(),
+            text: text.to_string(),
+        },
+    );
+}
+
+fn toggle_thumbnail_collapse(inner_rc: &Rc<RefCell<PinInner>>) {
+    let controller = {
+        let mut st = inner_rc.borrow_mut();
+        if st.collapsed {
+            st.scale = st.saved_scale.clamp(0.15, 8.0);
+            st.collapsed = false;
+        } else {
+            st.saved_scale = st.scale;
+            let max_dim = st.base_w_dip.max(st.base_h_dip).max(1.0);
+            st.scale = (72.0 / max_dim).clamp(0.08, 0.85);
+            st.collapsed = true;
+        }
+        st.controller
+    };
+    render_pin_inner(inner_rc);
+    unsafe {
+        let _ = PostMessageW(Some(controller), WM_APP_PIN_CHANGED, WPARAM(0), LPARAM(0));
+    }
+}
+
+fn reset_pin_scale(inner_rc: &Rc<RefCell<PinInner>>) {
+    let controller = {
+        let mut st = inner_rc.borrow_mut();
+        st.scale = 1.0;
+        st.saved_scale = 1.0;
+        st.collapsed = false;
+        st.opacity = 1.0;
+        st.controller
+    };
+    render_pin_inner(inner_rc);
+    unsafe {
+        let _ = PostMessageW(Some(controller), WM_APP_PIN_CHANGED, WPARAM(0), LPARAM(0));
+    }
+}
+
+fn copy_pin_image(inner_rc: &Rc<RefCell<PinInner>>) {
+    let st = inner_rc.borrow();
+    if ImageClipboard::copy(&st.image).is_ok() {
+        post_pin_balloon(st.controller, "贴图", "已复制贴图到剪贴板。");
+    }
+}
+
+fn save_pin_image(hwnd: HWND, inner_rc: &Rc<RefCell<PinInner>>) {
+    let (img_copy, controller) = {
+        let st = inner_rc.borrow();
+        (st.image.clone(), st.controller)
+    };
+    let default_name = format!("Suite-Pin-{}.png", chrono::Local::now().format("%Y%m%d-%H%M%S"));
+    if let Some(path) = save_png_dialog(hwnd, "", &default_name) {
+        if suite_capture::save_png_to_path(&img_copy, &path).is_ok() {
+            post_pin_balloon(controller, "贴图已保存", &path.to_string_lossy());
+        } else {
+            post_pin_balloon(controller, "保存失败", "无法写入目标 PNG 文件。");
+        }
+    }
+}
+
+fn trigger_pin_ocr(inner_rc: &Rc<RefCell<PinInner>>) {
+    let (controller, img, busy) = {
+        let st = inner_rc.borrow();
+        (st.controller, st.image.clone(), Arc::clone(&st.ocr_busy))
+    };
+    if busy.swap(true, Ordering::AcqRel) {
+        post_pin_balloon(controller, "贴图识字", "正在识字中，请稍候…");
+        return;
+    }
+    post_pin_balloon(controller, "贴图识字", "正在识别贴图中的文字…");
+    let ctrl_raw = controller.0 as isize;
+    let _ = std::thread::Builder::new()
+        .name("suite-pin-ocr".to_string())
+        .spawn(move || {
+            let res = WindowsOcr::recognize_blocking(img);
+            busy.store(false, Ordering::Release);
+            let msg = if res.succeeded {
+                if let Some(txt) = res.text {
+                    match ImageClipboard::copy_text(&txt) {
+                        Ok(()) => {
+                            let chars = txt.chars().count();
+                            format!("已复制识别文字（{chars} 字）。")
+                        }
+                        Err(_) => WindowsOcr::CLIPBOARD_FAILED.to_string(),
+                    }
+                } else {
+                    WindowsOcr::NO_TEXT.to_string()
+                }
+            } else {
+                res.error.unwrap_or_else(|| WindowsOcr::FAILED.to_string())
+            };
+            post_pin_balloon(HWND(ctrl_raw as *mut _), "贴图识字", &msg);
+        });
+}
+
 fn show_pin_context_menu(hwnd: HWND, inner_rc: &Rc<RefCell<PinInner>>) {
-    let ct = inner_rc.borrow().click_through;
+    let (ct, opacity, collapsed) = {
+        let st = inner_rc.borrow();
+        (st.click_through, st.opacity, st.collapsed)
+    };
     let cmd = unsafe {
         let Ok(hmenu) = CreatePopupMenu() else {
             return;
@@ -464,20 +638,23 @@ fn show_pin_context_menu(hwnd: HWND, inner_rc: &Rc<RefCell<PinInner>>) {
                 PCWSTR(w.as_ptr()),
             );
         };
-        add(1, "不透明度 100%", 0);
-        add(2, "不透明度 75%", 0);
-        add(3, "不透明度 50%", 0);
-        add(4, "不透明度 25%", 0);
+        let chk = |cond: bool| if cond { MF_CHECKED.0 } else { MF_UNCHECKED.0 };
+        add(1, "不透明度 100%", chk((opacity - 1.0).abs() < 0.06));
+        add(2, "不透明度 75%", chk((opacity - 0.75).abs() < 0.06));
+        add(3, "不透明度 50%", chk((opacity - 0.50).abs() < 0.06));
+        add(4, "不透明度 25%", chk((opacity - 0.25).abs() < 0.06));
         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null());
-        add(
-            5,
-            "鼠标穿透 (Ctrl+Shift+Q)",
-            if ct { MF_CHECKED.0 } else { MF_UNCHECKED.0 },
-        );
-        add(6, "复制图片", 0);
-        add(7, "保存图片...", 0);
+        add(10, "缩略图模式 (双击)", chk(collapsed));
+        add(11, "重置大小 1:1 (R)", 0);
+        add(12, "顺时针旋转 90°", 0);
+        add(13, "水平翻转", 0);
         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null());
-        add(8, "关闭", 0);
+        add(14, "识字 OCR (O)", 0);
+        add(5, "鼠标穿透 (Ctrl+Shift+Q)", chk(ct));
+        add(6, "复制图片 (Ctrl+C)", 0);
+        add(7, "保存图片... (Ctrl+S)", 0);
+        let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, PCWSTR::null());
+        add(8, "关闭 (Esc)", 0);
 
         let mut pt = POINT::default();
         let _ = GetCursorPos(&mut pt);
@@ -523,18 +700,8 @@ fn show_pin_context_menu(hwnd: HWND, inner_rc: &Rc<RefCell<PinInner>>) {
                 let _ = PostMessageW(Some(controller), WM_APP_PIN_CHANGED, WPARAM(0), LPARAM(0));
             }
         }
-        6 => {
-            let st = inner_rc.borrow();
-            let _ = ImageClipboard::copy(&st.image);
-        }
-        7 => {
-            let img_copy = inner_rc.borrow().image.clone();
-            if let Some(path) = save_png_dialog(hwnd, "", "Suite-Pin.png") {
-                let _ = suite_capture::save_png_to_path(&img_copy, &path);
-            } else {
-                let _ = save_png_atomic(&img_copy, None);
-            }
-        }
+        6 => copy_pin_image(inner_rc),
+        7 => save_pin_image(hwnd, inner_rc),
         8 => {
             let controller = inner_rc.borrow().controller;
             unsafe {
@@ -542,6 +709,29 @@ fn show_pin_context_menu(hwnd: HWND, inner_rc: &Rc<RefCell<PinInner>>) {
                 let _ = PostMessageW(Some(controller), WM_APP_PIN_CHANGED, WPARAM(0), LPARAM(0));
             }
         }
+        10 => toggle_thumbnail_collapse(inner_rc),
+        11 => reset_pin_scale(inner_rc),
+        12 => {
+            let controller = {
+                let mut st = inner_rc.borrow_mut();
+                let s = &mut *st;
+                s.image = s.image.rotate_90_cw();
+                std::mem::swap(&mut s.base_w_dip, &mut s.base_h_dip);
+                s.controller
+            };
+            render_pin_inner(inner_rc);
+            unsafe {
+                let _ = PostMessageW(Some(controller), WM_APP_PIN_CHANGED, WPARAM(0), LPARAM(0));
+            }
+        }
+        13 => {
+            {
+                let mut st = inner_rc.borrow_mut();
+                st.image = st.image.flip_horizontal();
+            }
+            render_pin_inner(inner_rc);
+        }
+        14 => trigger_pin_ocr(inner_rc),
         _ => {}
     }
 }
@@ -552,6 +742,7 @@ pub struct PinboardService {
     pins: Vec<Rc<PinWindow>>,
     next_id: u64,
     theme: ThemeKind,
+    all_hidden: bool,
 }
 
 impl PinboardService {
@@ -562,11 +753,15 @@ impl PinboardService {
             pins: Vec::new(),
             next_id: 1,
             theme: ThemeKind::Light,
+            all_hidden: false,
         }
     }
 
     pub fn prune_closed(&mut self) {
         self.pins.retain(|p| p.is_alive());
+        if self.pins.is_empty() {
+            self.all_hidden = false;
+        }
     }
 
     pub fn pin(
@@ -578,6 +773,12 @@ impl PinboardService {
         dpi_y: u32,
     ) {
         self.prune_closed();
+        if self.all_hidden {
+            self.all_hidden = false;
+            for p in &self.pins {
+                p.set_visible(true);
+            }
+        }
         let id = self.next_id;
         self.next_id += 1;
         if let Some(win) = PinWindow::create(
@@ -674,6 +875,26 @@ impl PinboardService {
         for p in self.pins.drain(..) {
             p.close();
         }
+        self.all_hidden = false;
+    }
+
+    pub fn pin_count_and_hidden(&mut self) -> (usize, bool) {
+        self.prune_closed();
+        (self.pins.len(), self.all_hidden)
+    }
+
+    pub fn toggle_all_visible(&mut self) -> bool {
+        self.prune_closed();
+        if self.pins.is_empty() {
+            self.all_hidden = false;
+            return false;
+        }
+        self.all_hidden = !self.all_hidden;
+        let vis = !self.all_hidden;
+        for p in &self.pins {
+            p.set_visible(vis);
+        }
+        self.all_hidden
     }
 }
 

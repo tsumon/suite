@@ -1,8 +1,8 @@
-﻿; Suite - Inno Setup 6 (v0.2.0 Rust Native)
+﻿; Suite - Inno Setup 6 (v0.3.0 Rust Native)
 ; GPL-3.0 - see LICENSE / NOTICE in the repo root.
 
 #define MyAppName "Suite"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "tsumon"
 #define MyAppExeName "Suite.exe"
 #ifndef StageDir

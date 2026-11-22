@@ -349,6 +349,261 @@ impl PixelDraw {
         );
     }
 
+    /// Draws a filled circular step badge with a crisp 2px white ring.
+    #[allow(clippy::too_many_arguments)]
+    pub fn filled_circle_with_ring(
+        buffer: &mut PixelBuffer,
+        cx: i32,
+        cy: i32,
+        radius: i32,
+        b: u8,
+        g: u8,
+        r: u8,
+        a: u8,
+    ) {
+        if buffer.width <= 0 || buffer.height <= 0 || buffer.bgra.is_empty() {
+            return;
+        }
+        let rad = radius.max(4);
+        let outer = rad + 2;
+        let inner_r2 = (rad - 1).max(0) * (rad - 1).max(0);
+        let mid_r2 = (rad + 1) * (rad + 1);
+        let y0 = (cy - outer).clamp(0, buffer.height);
+        let y1 = (cy + outer + 1).clamp(0, buffer.height);
+        let x0 = (cx - outer).clamp(0, buffer.width);
+        let x1 = (cx + outer + 1).clamp(0, buffer.width);
+
+        for y in y0..y1 {
+            let dy = y - cy;
+            let row = (y * buffer.stride) as usize;
+            for x in x0..x1 {
+                let dx = x - cx;
+                let d2 = dx * dx + dy * dy;
+                if d2 > mid_r2 {
+                    continue;
+                }
+                let i = row + (x * 4) as usize;
+                let (sb, sg, sr, sa) = if d2 >= inner_r2 {
+                    (255u8, 255u8, 255u8, 255u8)
+                } else {
+                    (b, g, r, a)
+                };
+                if sa == 255 {
+                    buffer.bgra[i] = sb;
+                    buffer.bgra[i + 1] = sg;
+                    buffer.bgra[i + 2] = sr;
+                    buffer.bgra[i + 3] = 255;
+                } else {
+                    buffer.bgra[i] = Self::blend(buffer.bgra[i], sb, sa);
+                    buffer.bgra[i + 1] = Self::blend(buffer.bgra[i + 1], sg, sa);
+                    buffer.bgra[i + 2] = Self::blend(buffer.bgra[i + 2], sr, sa);
+                    buffer.bgra[i + 3] = buffer.bgra[i + 3].saturating_add(sa);
+                }
+            }
+        }
+    }
+
+    pub fn blur_stamp(buffer: &mut PixelBuffer, cx: i32, cy: i32, brush_radius: i32) {
+        Self::blur_brush(buffer, &[(cx, cy)], brush_radius);
+    }
+
+    /// Applies a smooth separable 2-pass box blur inside the circular brush stroke path.
+    pub fn blur_brush(buffer: &mut PixelBuffer, points: &[(i32, i32)], brush_radius: i32) {
+        if points.is_empty() || buffer.width <= 0 || buffer.height <= 0 || buffer.bgra.is_empty() {
+            return;
+        }
+        let radius = brush_radius.max(2);
+        let mut min_x = i32::MAX;
+        let mut min_y = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut max_y = i32::MIN;
+        for &(px, py) in points {
+            min_x = min_x.min(px - radius);
+            min_y = min_y.min(py - radius);
+            max_x = max_x.max(px + radius + 1);
+            max_y = max_y.max(py + radius + 1);
+        }
+        let mask_rect = PixelRect::new(min_x, min_y, max_x - min_x, max_y - min_y)
+            .clamp_to(buffer.width, buffer.height);
+        if mask_rect.is_empty() {
+            return;
+        }
+
+        const KERNEL_R: i32 = 5;
+        let pad = KERNEL_R * 2;
+        let src_rect = PixelRect::new(
+            mask_rect.x - pad,
+            mask_rect.y - pad,
+            mask_rect.width + pad * 2,
+            mask_rect.height + pad * 2,
+        )
+        .clamp_to(buffer.width, buffer.height);
+        let sw = src_rect.width as usize;
+        let sh = src_rect.height as usize;
+
+        let mut curr = vec![[0u8; 4]; sw * sh];
+        for ry in 0..src_rect.height {
+            let srow = ((src_rect.y + ry) * buffer.stride + src_rect.x * 4) as usize;
+            let dst_base = (ry as usize) * sw;
+            for rx in 0..src_rect.width {
+                let si = srow + (rx * 4) as usize;
+                curr[dst_base + rx as usize] = [
+                    buffer.bgra[si],
+                    buffer.bgra[si + 1],
+                    buffer.bgra[si + 2],
+                    buffer.bgra[si + 3],
+                ];
+            }
+        }
+
+        let mut tmp = vec![[0u8; 4]; sw * sh];
+        for _pass in 0..2 {
+            Self::separable_box_blur_pass(&curr, &mut tmp, sw, sh, KERNEL_R);
+            std::mem::swap(&mut curr, &mut tmp);
+        }
+
+        // Rasterize capsule brush mask over mask_rect
+        let mw = mask_rect.width as usize;
+        let mh = mask_rect.height as usize;
+        let mut mask = vec![false; mw * mh];
+        let r2 = radius * radius;
+        let mut stamp_disc = |cx: i32, cy: i32| {
+            let x0 = (cx - radius).max(mask_rect.x) - mask_rect.x;
+            let x1 = (cx + radius + 1).min(mask_rect.right()) - mask_rect.x;
+            let y0 = (cy - radius).max(mask_rect.y) - mask_rect.y;
+            let y1 = (cy + radius + 1).min(mask_rect.bottom()) - mask_rect.y;
+            for ly in y0..y1 {
+                let dy = (mask_rect.y + ly) - cy;
+                let row = (ly as usize) * mw;
+                for lx in x0..x1 {
+                    let dx = (mask_rect.x + lx) - cx;
+                    if dx * dx + dy * dy <= r2 {
+                        mask[row + lx as usize] = true;
+                    }
+                }
+            }
+        };
+
+        stamp_disc(points[0].0, points[0].1);
+        let step = (radius / 3).max(1);
+        for pair in points.windows(2) {
+            let (mut x, mut y) = pair[0];
+            let (x1, y1) = pair[1];
+            let dx = (x1 - x).abs();
+            let dy = (y1 - y).abs();
+            let sx = if x < x1 { 1 } else { -1 };
+            let sy = if y < y1 { 1 } else { -1 };
+            let mut err = dx - dy;
+            let mut walked = 0;
+            loop {
+                if walked % step == 0 {
+                    stamp_disc(x, y);
+                }
+                if x == x1 && y == y1 {
+                    break;
+                }
+                let e2 = 2 * err;
+                if e2 > -dy {
+                    err -= dy;
+                    x += sx;
+                }
+                if e2 < dx {
+                    err += dx;
+                    y += sy;
+                }
+                walked += 1;
+            }
+            stamp_disc(x1, y1);
+        }
+
+        let off_x = mask_rect.x - src_rect.x;
+        let off_y = mask_rect.y - src_rect.y;
+        for ly in 0..mask_rect.height {
+            let mrow = (ly as usize) * mw;
+            let brow = ((mask_rect.y + ly) * buffer.stride) as usize;
+            let srow = ((ly + off_y) as usize) * sw + off_x as usize;
+            for lx in 0..mask_rect.width {
+                if mask[mrow + lx as usize] {
+                    let px = curr[srow + lx as usize];
+                    let bi = brow + ((mask_rect.x + lx) * 4) as usize;
+                    buffer.bgra[bi] = px[0];
+                    buffer.bgra[bi + 1] = px[1];
+                    buffer.bgra[bi + 2] = px[2];
+                    buffer.bgra[bi + 3] = px[3];
+                }
+            }
+        }
+    }
+
+    fn separable_box_blur_pass(
+        src: &[[u8; 4]],
+        dst: &mut [[u8; 4]],
+        w: usize,
+        h: usize,
+        k: i32,
+    ) {
+        if w == 0 || h == 0 {
+            return;
+        }
+        let mut horiz = vec![[0u8; 4]; w * h];
+        let mut pb = vec![0u32; w.max(h) + 1];
+        let mut pg = vec![0u32; w.max(h) + 1];
+        let mut pr = vec![0u32; w.max(h) + 1];
+        let mut pa = vec![0u32; w.max(h) + 1];
+        let ku = k.max(1) as usize;
+
+        for y in 0..h {
+            let row = y * w;
+            pb[0] = 0;
+            pg[0] = 0;
+            pr[0] = 0;
+            pa[0] = 0;
+            for x in 0..w {
+                let p = src[row + x];
+                pb[x + 1] = pb[x] + u32::from(p[0]);
+                pg[x + 1] = pg[x] + u32::from(p[1]);
+                pr[x + 1] = pr[x] + u32::from(p[2]);
+                pa[x + 1] = pa[x] + u32::from(p[3]);
+            }
+            for x in 0..w {
+                let x0 = x.saturating_sub(ku);
+                let x1 = (x + ku).min(w - 1);
+                let cnt = (x1 - x0 + 1) as u32;
+                horiz[row + x] = [
+                    ((pb[x1 + 1] - pb[x0]) / cnt) as u8,
+                    ((pg[x1 + 1] - pg[x0]) / cnt) as u8,
+                    ((pr[x1 + 1] - pr[x0]) / cnt) as u8,
+                    ((pa[x1 + 1] - pa[x0]) / cnt) as u8,
+                ];
+            }
+        }
+
+        for x in 0..w {
+            pb[0] = 0;
+            pg[0] = 0;
+            pr[0] = 0;
+            pa[0] = 0;
+            for y in 0..h {
+                let p = horiz[y * w + x];
+                pb[y + 1] = pb[y] + u32::from(p[0]);
+                pg[y + 1] = pg[y] + u32::from(p[1]);
+                pr[y + 1] = pr[y] + u32::from(p[2]);
+                pa[y + 1] = pa[y] + u32::from(p[3]);
+            }
+            for y in 0..h {
+                let y0 = y.saturating_sub(ku);
+                let y1 = (y + ku).min(h - 1);
+                let cnt = (y1 - y0 + 1) as u32;
+                dst[y * w + x] = [
+                    ((pb[y1 + 1] - pb[y0]) / cnt) as u8,
+                    ((pg[y1 + 1] - pg[y0]) / cnt) as u8,
+                    ((pr[y1 + 1] - pr[y0]) / cnt) as u8,
+                    ((pa[y1 + 1] - pa[y0]) / cnt) as u8,
+                ];
+            }
+        }
+    }
+
     pub fn fill_color(buffer: &mut PixelBuffer, rect: PixelRect, b: u8, g: u8, r: u8, a: u8) {
         let clipped = rect.clamp_to(buffer.width, buffer.height);
         if clipped.is_empty() {
@@ -476,6 +731,19 @@ pub enum AnnotationOp {
         points: Vec<(i32, i32)>,
         brush_radius: i32,
     },
+    BlurStroke {
+        points: Vec<(i32, i32)>,
+        brush_radius: i32,
+    },
+    StepBadge {
+        cx: i32,
+        cy: i32,
+        number: u32,
+        radius: i32,
+        b: u8,
+        g: u8,
+        r: u8,
+    },
     Erase {
         points: Vec<(i32, i32)>,
         thickness: i32,
@@ -573,6 +841,37 @@ where
                     PixelDraw::DEFAULT_MOSAIC_BLOCK,
                 );
             }
+            AnnotationOp::BlurStroke {
+                points,
+                brush_radius,
+            } => {
+                PixelDraw::blur_brush(&mut result, points, *brush_radius);
+            }
+            AnnotationOp::StepBadge {
+                cx,
+                cy,
+                number,
+                radius,
+                b,
+                g,
+                r,
+            } => {
+                PixelDraw::filled_circle_with_ring(&mut result, *cx, *cy, *radius, *b, *g, *r, 255);
+                let label = number.to_string();
+                let font_size = (*radius as f32 * 1.15).max(11.0);
+                let half_w = (label.len() as f32 * font_size * 0.30).round() as i32;
+                let half_h = (font_size * 0.64).round() as i32;
+                draw_text(
+                    &mut result,
+                    *cx - half_w,
+                    *cy - half_h,
+                    &label,
+                    255,
+                    255,
+                    255,
+                    font_size,
+                );
+            }
             AnnotationOp::Erase { points, thickness } => {
                 PixelDraw::restore_stroke(&mut result, original, points, *thickness);
             }
@@ -616,5 +915,44 @@ mod tests {
         let baked = bake_annotations(&orig, &ops, |_, _, _, _, _, _, _, _| {});
         assert_eq!(baked.try_get_pixel(4, 4), Some((10, 20, 30, 255)));
         assert_eq!(baked.try_get_pixel(15, 4), Some((0, 0, 255, 255)));
+    }
+
+    #[test]
+    fn blur_stroke_softens_inside_brush_and_preserves_outside() {
+        let mut orig = PixelBuffer::allocate(64, 64);
+        PixelDraw::fill_color(&mut orig, PixelRect::new(0, 0, 32, 64), 0, 0, 0, 255);
+        PixelDraw::fill_color(&mut orig, PixelRect::new(32, 0, 32, 64), 240, 240, 240, 255);
+        let ops = vec![AnnotationOp::BlurStroke {
+            points: vec![(32, 32)],
+            brush_radius: 10,
+        }];
+        let baked = bake_annotations(&orig, &ops, |_, _, _, _, _, _, _, _| {});
+        let edge_px = baked.try_get_pixel(32, 32).unwrap();
+        assert!(edge_px.0 > 20 && edge_px.0 < 220, "expected blurred edge, got {:?}", edge_px);
+        assert_eq!(baked.try_get_pixel(2, 2), Some((0, 0, 0, 255)));
+        assert_eq!(baked.try_get_pixel(60, 60), Some((240, 240, 240, 255)));
+    }
+
+    #[test]
+    fn step_badge_paints_fill_ring_and_invokes_text_callback() {
+        let mut orig = PixelBuffer::allocate(64, 64);
+        PixelDraw::fill_color(&mut orig, PixelRect::new(0, 0, 64, 64), 20, 20, 20, 255);
+        let mut captured_label = String::new();
+        let ops = vec![AnnotationOp::StepBadge {
+            cx: 32,
+            cy: 32,
+            number: 3,
+            radius: 14,
+            b: 30,
+            g: 60,
+            r: 220,
+        }];
+        let baked = bake_annotations(&orig, &ops, |_, _, _, txt, _, _, _, _| {
+            captured_label = txt.to_string();
+        });
+        assert_eq!(captured_label, "3");
+        assert_eq!(baked.try_get_pixel(32, 32), Some((30, 60, 220, 255)));
+        assert_eq!(baked.try_get_pixel(32 + 14, 32), Some((255, 255, 255, 255)));
+        assert_eq!(baked.try_get_pixel(2, 2), Some((20, 20, 20, 255)));
     }
 }

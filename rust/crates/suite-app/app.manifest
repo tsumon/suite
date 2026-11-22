@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
-  <assemblyIdentity version="0.2.0.0" processorArchitecture="amd64" name="Suite" type="win32"/>
+  <assemblyIdentity version="0.3.0.0" processorArchitecture="amd64" name="Suite" type="win32"/>
   <description>Suite — Windows tray utility</description>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>

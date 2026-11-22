@@ -327,7 +327,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "suite-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "serde",
@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "suite-capture"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "png",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "suite-contracts"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -364,14 +364,14 @@ dependencies = [
 
 [[package]]
 name = "suite-netspeed"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "windows",
 ]
 
 [[package]]
 name = "suite-platform"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "serde_json",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "suite-taskbarfx"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "suite-contracts",
  "suite-platform",
@@ -392,7 +392,7 @@ dependencies = [
 
 [[package]]
 name = "suite-theme"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "suite-contracts",
  "suite-platform",

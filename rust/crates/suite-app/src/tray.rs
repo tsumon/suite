@@ -24,6 +24,8 @@ pub struct TrayIconService {
     scroll_label: String,
     tip: String,
     click_through_available: bool,
+    pin_count: usize,
+    pins_hidden: bool,
 }
 
 #[derive(Clone)]
@@ -33,6 +35,8 @@ pub struct TrayMenuArgs {
     pub start_with_windows: bool,
     pub scroll_label: String,
     pub click_through_available: bool,
+    pub pin_count: usize,
+    pub pins_hidden: bool,
 }
 
 impl TrayIconService {
@@ -49,6 +53,8 @@ impl TrayIconService {
             scroll_label: "滚动长截图 (F4)".to_string(),
             tip: "Suite".to_string(),
             click_through_available: false,
+            pin_count: 0,
+            pins_hidden: false,
         };
         svc.add_or_restore();
         svc
@@ -106,8 +112,10 @@ impl TrayIconService {
         }
     }
 
-    pub fn set_click_through_available(&mut self, available: bool) {
-        self.click_through_available = available;
+    pub fn set_pin_state(&mut self, count: usize, pins_hidden: bool, click_through_available: bool) {
+        self.pin_count = count;
+        self.pins_hidden = pins_hidden;
+        self.click_through_available = click_through_available;
     }
 
     pub fn balloon(&self, title: &str, text: &str) {
@@ -132,6 +140,8 @@ impl TrayIconService {
             start_with_windows: self.start_with_windows,
             scroll_label: self.scroll_label.clone(),
             click_through_available: self.click_through_available,
+            pin_count: self.pin_count,
+            pins_hidden: self.pins_hidden,
         }
     }
 
@@ -160,11 +170,17 @@ impl TrayIconService {
                 0,
             );
             append_item(AppCommand::Capture, "区域截图", 0);
+            append_item(AppCommand::DelayedCapture, "延时 3 秒截图", 0);
             append_item(AppCommand::ScrollCapture, &args.scroll_label, 0);
             append_item(AppCommand::ColorPick, "取色", 0);
             append_item(AppCommand::History, "截图历史", 0);
             append_item(AppCommand::PinFromClipboard, "贴图（从剪贴板）", 0);
             append_item(AppCommand::PinManage, "贴图管理", 0);
+            append_item(
+                AppCommand::TogglePinsVisible,
+                if args.pins_hidden { "显示全部贴图" } else { "隐藏全部贴图" },
+                if args.pin_count > 0 { 0 } else { MF_GRAYED.0 },
+            );
             append_item(
                 AppCommand::ClearClickThrough,
                 "取消贴图穿透",
